@@ -20,6 +20,18 @@ add_quintiles = function(data_with_deciles){
   return(data_with_quintiles)
 }
 
+write_lsoa_01_11_mapping = function(database_name="primary_care_data.sqlite3"){
+  mapping = read_csv("raw_data/Lower_Layer_Super_Output_Area_2001_to_Lower_Layer_Super_Output_Area_2011_to_Local_Authority_District_2011_Lookup_in_England_and_Wales.csv")
+  weighted_mapping = mapping %>% left_join(
+    mapping %>% filter(CHGIND=="S") %>%
+    group_by(LSOA01CD) %>%
+    summarise(WEIGHT=1/n())) %>%
+    mutate(WEIGHT=if_else(CHGIND %in% c("M","U","X"),1,WEIGHT))
+  db = dbConnect(SQLite(), dbname=database_name)
+  dbWriteTable(conn = db, name = "lsoa_2001_2011_mapping", weighted_mapping, overwrite=TRUE)
+  dbDisconnect(db)
+}
+
 format_ons_pop = function(year, sex){
   xl = read_excel(path=paste0("raw_data/ons_pop/SAPE20DT2-mid-",year,"-lsoa-syoa-estimates-unformatted.xls"),
                   sheet=paste0("Mid-",year," ",sex),
@@ -136,7 +148,10 @@ write_workforce_data_to_db = function(database_name="primary_care_data.sqlite3")
         group_by(YEAR,PRAC_CODE) %>%
         summarise(TOTAL_GP_RET_HC=sum(HC),TOTAL_GP_RET_FTE=sum(FTE))
     ) %>%
-    mutate_all(~replace(., is.na(.), 0))
+    ungroup() %>%
+    mutate_all(~replace(., is.na(.), 0)) %>%
+      mutate(TOTAL_GP_EXRRL_HC=TOTAL_GP_EXRR_HC,
+        TOTAL_GP_EXRRL_FTE=TOTAL_GP_EXRR_FTE)
     
   
   wf_2013 = read_csv("raw_data/workforce/nhs-staf-2013-gene-prac-data/General Practice 2013 Practice Level.csv",
@@ -381,15 +396,22 @@ process_attribution_dataset = function(database_name="primary_care_data.sqlite3"
     select(LSOA11CD,IMD_DECILE=VALUE) %>%
     collect()
   
+  lsoa_mapping = tbl(db,"lsoa_2001_2011_mapping") %>%
+    select(LSOA01CD,LSOA11CD,WEIGHT) %>%
+    collect()
   
   for (year in 2004:2018) {
   
       if (year %in% 2004:2012) {
         ads = read_csv(paste0("raw_data/gp_pop_lsoa/ls",year,".csv")) 
         
-        ads_formatted = ads %>%
+        ads_formatted_2001 = ads %>%
           mutate(POP=rowSums(.[3:ncol(ads)])) %>%
-          select(PRAC_CODE=1,LSOA11CD=2,POP)
+          select(PRAC_CODE=1,LSOA01CD=2,POP)
+        ads_formatted = left_join(ads_formatted_2001, lsoa_mapping) %>%
+          group_by(PRAC_CODE,LSOA11CD) %>%
+          summarise(POP=sum(WEIGHT*POP)) %>%
+          drop_na(LSOA11CD)
       }  
       
       if(year==2013){
@@ -526,10 +548,10 @@ calculate_gp_per_100k_trend_by_imd_practice_level = function(database_name="prim
   
 }
 
-calculate_gp_per_100k_trend_by_imd_lsoa_level = function(database_name="primary_care_data.sqlite3", imd_aggregated=TRUE, end_year=2014){
+calculate_gp_per_100k_trend_by_imd_lsoa_level = function(database_name="primary_care_data.sqlite3", imd_aggregated=TRUE, start_year=2004, end_year=2014){
   db = dbConnect(SQLite(), dbname=database_name)
   gps = tbl(db, "gp_workforce") %>% 
-    select(YEAR,PRAC_CODE,TOTAL_GP_EXRR_FTE, TOTAL_GP_FTE) %>%
+    select(YEAR,PRAC_CODE,TOTAL_GP_EXRRL_FTE, TOTAL_GP_FTE) %>%
     collect()
   
   if(imd_aggregated){
@@ -540,19 +562,19 @@ calculate_gp_per_100k_trend_by_imd_lsoa_level = function(database_name="primary_
       summarise(QUINTILE_PROP=sum(DECILE_PROP))
     
     gps_imd_quintile = inner_join(gps,ads_quintile) %>%
-      mutate(TOTAL_GP_EXRR_FTE = QUINTILE_PROP*TOTAL_GP_EXRR_FTE,
+      mutate(TOTAL_GP_EXRRL_FTE = QUINTILE_PROP*TOTAL_GP_EXRRL_FTE,
              TOTAL_GP_FTE = QUINTILE_PROP*TOTAL_GP_FTE) %>%
       group_by(YEAR,IMD_QUINTILE) %>%
-      summarise(TOTAL_GP_EXRR_FTE = sum(TOTAL_GP_EXRR_FTE,na.rm=TRUE),
+      summarise(TOTAL_GP_EXRRL_FTE = sum(TOTAL_GP_EXRRL_FTE,na.rm=TRUE),
                 TOTAL_GP_FTE = sum(TOTAL_GP_FTE,na.rm=TRUE))
     
     adj_pop = tbl(db, "adj_pop_decile") %>% collect()
     adj_pop_quintile = add_quintiles(adj_pop) %>% 
       group_by(YEAR, IMD_QUINTILE) %>%
-      summarise(NEED_ADJ_POP=sum(NEED_ADJ_POP), TOTAL_POP=sum(TOTAL_POP))
-
+      summarise(NEED_ADJ_POP=sum(NEED_ADJ_POP), TOTAL_POP=sum(TOTAL_POP)) 
     
-    gps_quintile = inner_join(gps_imd_quintile,adj_pop_quintile)
+    gps_quintile = inner_join(gps_imd_quintile,adj_pop_quintile) %>%
+      ungroup()
   
   } else {
     ads_lsoa = tbl(db, "ads_lsoa_props") %>% collect()
@@ -565,56 +587,57 @@ calculate_gp_per_100k_trend_by_imd_lsoa_level = function(database_name="primary_
       collect() %>% add_quintiles()
     
     gps_lsoa = inner_join(gps,ads_lsoa) %>%
-      mutate(TOTAL_GP_EXRR_FTE = LSOA_PROP*TOTAL_GP_EXRR_FTE,
+      mutate(TOTAL_GP_EXRRL_FTE = LSOA_PROP*TOTAL_GP_EXRRL_FTE,
              TOTAL_GP_FTE = LSOA_PROP*TOTAL_GP_FTE) %>%
       group_by(YEAR,LSOA11CD) %>%
-      summarise(TOTAL_GP_EXRR_FTE = sum(TOTAL_GP_EXRR_FTE,na.rm=FALSE),
+      summarise(TOTAL_GP_EXRRL_FTE = sum(TOTAL_GP_EXRRL_FTE,na.rm=FALSE),
                 TOTAL_GP_FTE = sum(TOTAL_GP_FTE,na.rm=FALSE)) %>%
       inner_join(adj_pop_lsoa) %>%
       inner_join(imd)
     
     gps_quintile = gps_lsoa %>% 
-      drop_na(TOTAL_GP_EXRR_FTE,TOTAL_GP_FTE,NEED_ADJ_POP,TOTAL_POP,IMD_QUINTILE) %>%
+      drop_na(TOTAL_GP_EXRRL_FTE,TOTAL_GP_FTE,NEED_ADJ_POP,TOTAL_POP,IMD_QUINTILE) %>%
       group_by(YEAR,IMD_QUINTILE) %>%
-      summarise(TOTAL_GP_EXRR_FTE = sum(TOTAL_GP_EXRR_FTE),
+      summarise(TOTAL_GP_EXRRL_FTE = sum(TOTAL_GP_EXRRL_FTE),
                 TOTAL_GP_FTE = sum(TOTAL_GP_FTE),
                 NEED_ADJ_POP = sum(NEED_ADJ_POP),
-                TOTAL_POP = sum(TOTAL_POP))
+                TOTAL_POP = sum(TOTAL_POP)) %>%
+      ungroup()
   }
   
-  
   graph_data = gps_quintile %>%
-    filter(YEAR<=end_year) %>%
+    filter(YEAR %in% start_year:end_year) %>%
     mutate(GPS_PER_100K=round(100000*TOTAL_GP_FTE/TOTAL_POP,1),
            GPS_PER_100K_ADJ=round(100000*TOTAL_GP_FTE/NEED_ADJ_POP,1),
-           GPS_EXRR_PER_100K=round(100000*TOTAL_GP_EXRR_FTE/TOTAL_POP,1),
-           GPS_EXRR_PER_100K_ADJ=round(100000*TOTAL_GP_EXRR_FTE/NEED_ADJ_POP,1)) %>%
+           GPS_EXRRL_PER_100K=round(100000*TOTAL_GP_EXRRL_FTE/TOTAL_POP,1),
+           GPS_EXRRL_PER_100K_ADJ=round(100000*TOTAL_GP_EXRRL_FTE/NEED_ADJ_POP,1),
+           YEAR=as.integer(YEAR)) %>%
     mutate(IMD_QUINTILE=as.factor(IMD_QUINTILE)) %>%
     gather(VAR,VAL,
            TOTAL_GP_FTE,
-           TOTAL_GP_EXRR_FTE,
+           TOTAL_GP_EXRRL_FTE,
            TOTAL_POP,
            NEED_ADJ_POP,
            GPS_PER_100K,
            GPS_PER_100K_ADJ,
-           GPS_EXRR_PER_100K,
-           GPS_EXRR_PER_100K_ADJ) %>%
+           GPS_EXRRL_PER_100K,
+           GPS_EXRRL_PER_100K_ADJ) %>%
     mutate(VAR=factor(VAR,c("TOTAL_POP",
                             "NEED_ADJ_POP",
                             "TOTAL_GP_FTE",
-                            "TOTAL_GP_EXRR_FTE",
+                            "TOTAL_GP_EXRRL_FTE",
                             "GPS_PER_100K",
                             "GPS_PER_100K_ADJ",
-                            "GPS_EXRR_PER_100K",
-                            "GPS_EXRR_PER_100K_ADJ"),
+                            "GPS_EXRRL_PER_100K",
+                            "GPS_EXRRL_PER_100K_ADJ"),
                       c("Population",
                         "Need adjusted Population",
                         "Total GPs (FTE)",
-                        "Total GPs (FTE excl. RR)",
+                        "Total GPs (FTE excl. RRL)",
                         "GPs (FTE) per 100k population unadjusted",
                         "GPs (FTE) per 100k population need adjusted",
-                        "GPs (FTE excl. RR) per 100k population unadjusted",
-                        "GPs (FTE excl. RR) per 100k population need adjusted")))
+                        "GPs (FTE excl. RRL) per 100k population unadjusted",
+                        "GPs (FTE excl. RRL) per 100k population need adjusted")))
   
   
   imd_labels = c("Q1 (most deprived)","Q2","Q3","Q4","Q5 (least deprived)")
@@ -622,10 +645,10 @@ calculate_gp_per_100k_trend_by_imd_lsoa_level = function(database_name="primary_
     aes(x=YEAR, y=VAL, group=IMD_QUINTILE, colour=IMD_QUINTILE) + 
     geom_line(aes(linetype=IMD_QUINTILE, size=IMD_QUINTILE)) + 
     geom_point(aes(shape=IMD_QUINTILE, colour=IMD_QUINTILE)) +
-    geom_vline(xintercept=c(2012.5), linetype="dashed", colour="lightgrey") +
     xlab("Year") +
     ylab("") +
     scale_y_continuous(labels = comma) +
+    scale_x_continuous(breaks=start_year:end_year, labels=paste(str_sub(start_year:end_year,3), str_sub((start_year+1):(end_year+1),3),sep="/")) +
     scale_colour_manual(name="IMD Quintile Group", values=c("black","lightblue","lightblue","lightblue","darkgrey"), labels=imd_labels) +
     scale_shape_manual(name="IMD Quintile Group", values=c(19,21,24,0,15), labels=imd_labels) +
     scale_linetype_manual(name="IMD Quintile Group", values=c(1,2,2,2,1), labels=imd_labels) +
@@ -637,11 +660,26 @@ calculate_gp_per_100k_trend_by_imd_lsoa_level = function(database_name="primary_
           plot.margin = unit(c(1, 1, 1, 1), "lines"),
           text=element_text(family = "Roboto", colour = "#3e3f3a")) +
     labs(title = "Trends in GP supply by neighbourhood deprivation",
-         subtitle = paste0("Data for England in years 2004 - ",end_year," based on IMD 2015 quintiles"),
-         caption = "Note: Data before dashed line from DH using 2001 LSOA neighbourhoods after the dashed line are from NHS Digital based on LSOA 2011 neighbourhoods")
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         caption = "Note: Data before dashed line from DH using 2001 LSOA neighbourhoods mapped to 2011 LSOAs after the dashed line are from NHS Digital based on LSOA 2011 neighbourhoods")
+  if (2013 %in% start_year:end_year) {
+    gp_plot = gp_plot + geom_vline(xintercept=c(2012.5), linetype="dashed", colour="lightgrey")
+  }
   
-  ggsave("figures/gp_trends.png", gp_plot, width=30, height=35, units="cm", dpi="print")
+    if (imd_aggregated) {
+     aggregation_unit = "IMD_QUINTILE"
+    } else {
+     aggregation_unit = "LSOA"
+    }
+  
+  ggsave(paste0("figures/gp_trends_",aggregation_unit,"_",start_year,"_",end_year,".png"), gp_plot, width=30, height=35, units="cm", dpi="print")
   
   dbDisconnect(db)
 }
+
+calculate_gp_per_100k_trend_by_imd_lsoa_level(database_name="primary_care_data.sqlite3", 
+                                              imd_aggregated=FALSE, 
+                                              start_year=2015, 
+                                              end_year=2018)
+  
   
