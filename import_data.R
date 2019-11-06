@@ -3,6 +3,9 @@ library("readxl")
 library("RSQLite")
 library("fingertipsR")
 library("scales")
+library("purrr")
+library("modelr")
+library("ggpubr")
 
 make_age_group  = function(start_age, end_age){
   paste0("AGE_",start_age:end_age, collapse = "+")
@@ -111,6 +114,93 @@ write_nhs_geography_to_db = function(database_name="primary_care_data.sqlite3"){
   db = dbConnect(SQLite(), dbname=database_name)
   dbWriteTable(conn = db, name = "nhs_geography", nhs_geography, overwrite=TRUE)
   dbDisconnect(db)
+}
+
+linear_impute = function(df, varname, default) {
+  f = as.formula(paste0(varname,"~ YEAR"))
+  if(all(is.na(df[,varname]))){
+    df[,varname] = default
+  }
+  model = lm(f, data = df)
+  return(model)
+}
+
+map_linear_impute = function(nested_df, variable, default){
+  df = nested_df %>%
+    mutate(model = map(data, linear_impute, varname=variable, default)) %>%
+    mutate(pred  = map2(data, model, add_predictions)) %>%
+    unnest(pred)
+  
+  df[is.na(df[variable]),variable] = df[is.na(df[variable]),"pred"]
+  df[df[variable]<0,variable] = 0
+  if (grepl("_HC",variable)) {
+    df[variable] = round(df[variable])
+  }
+  return(df %>% select(-pred))
+}
+
+impute_missing_gp_data_lm = function(database_name="primary_care_data.sqlite3"){
+  db = dbConnect(SQLite(), dbname=database_name)
+  gp_workforce = tbl(db, "gp_workforce_newdata") %>% filter(YEAR>2014) %>% collect() 
+  
+  gp_workforce_imputed = gp_workforce
+  gp_vars=c("TOTAL_GP_HC","TOTAL_GP_EXL_HC","TOTAL_GP_EXRL_HC","TOTAL_GP_EXRRL_HC","TOTAL_GP_SEN_PTNR_HC","TOTAL_GP_PTNR_PROV_HC","TOTAL_GP_SAL_BY_PRAC_HC","TOTAL_GP_SAL_BY_OTH_HC","TOTAL_GP_REG_ST3_4_HC","TOTAL_GP_REG_F1_2_HC","TOTAL_GP_RET_HC","TOTAL_GP_LOCUM_VAC_HC","TOTAL_GP_LOCUM_ABS_HC","TOTAL_GP_LOCUM_OTH_HC",
+            "MALE_GP_EXRRL_HC","MALE_GP_REG_ST3_4_HC","MALE_GP_RET_HC","FEMALE_GP_EXRRL_HC","FEMALE_GP_REG_ST3_4_HC","FEMALE_GP_RET_HC",
+            "TOTAL_GP_FTE","TOTAL_GP_EXL_FTE","TOTAL_GP_EXRL_FTE","TOTAL_GP_EXRRL_FTE","TOTAL_GP_SEN_PTNR_FTE","TOTAL_GP_PTNR_PROV_FTE","TOTAL_GP_SAL_BY_PRAC_FTE","TOTAL_GP_SAL_BY_OTH_FTE","TOTAL_GP_REG_ST3_4_FTE","TOTAL_GP_REG_F1_2_FTE","TOTAL_GP_RET_FTE","TOTAL_GP_LOCUM_VAC_FTE","TOTAL_GP_LOCUM_ABS_FTE","TOTAL_GP_LOCUM_OTH_FTE",
+            "MALE_GP_EXRRL_FTE","MALE_GP_REG_ST3_4_FTE","MALE_GP_RET_FTE","FEMALE_GP_EXRRL_FTE","FEMALE_GP_REG_ST3_4_FTE","FEMALE_GP_RET_FTE",
+            "MALE_GP_EXRRL_HC_UNDER30","MALE_GP_EXRRL_HC_30TO34","MALE_GP_EXRRL_HC_35TO39","MALE_GP_EXRRL_HC_40TO44","MALE_GP_EXRRL_HC_45TO49","MALE_GP_EXRRL_HC_50TO54","MALE_GP_EXRRL_HC_55TO59","MALE_GP_EXRRL_HC_60TO64","MALE_GP_EXRRL_HC_65TO69","MALE_GP_EXRRL_HC_70PLUS","MALE_GP_EXRRL_HC_UNKNOWN_AGE",
+            "FEMALE_GP_EXRRL_HC_UNDER30","FEMALE_GP_EXRRL_HC_30TO34","FEMALE_GP_EXRRL_HC_35TO39","FEMALE_GP_EXRRL_HC_40TO44","FEMALE_GP_EXRRL_HC_45TO49","FEMALE_GP_EXRRL_HC_50TO54","FEMALE_GP_EXRRL_HC_55TO59","FEMALE_GP_EXRRL_HC_60TO64","FEMALE_GP_EXRRL_HC_65TO69","FEMALE_GP_EXRRL_HC_70PLUS","FEMALE_GP_EXRRL_HC_UNKNOWN_AGE",
+            "TOTAL_NURSES_HC","TOTAL_N_PRAC_NURSE_HC","TOTAL_N_ADV_NURSE_PRAC_HC","TOTAL_N_NURSE_SPEC_HC","TOTAL_N_EXT_ROLE_NURSE_HC","TOTAL_N_TRAINEE_NURSE_HC","TOTAL_N_DISTRICT_NURSE_HC","TOTAL_N_NURSE_DISP_HC",
+            "TOTAL_NURSES_FTE","TOTAL_N_PRAC_NURSE_FTE","TOTAL_N_ADV_NURSE_PRAC_FTE","TOTAL_N_NURSE_SPEC_FTE","TOTAL_N_EXT_ROLE_NURSE_FTE","TOTAL_N_TRAINEE_NURSE_FTE","TOTAL_N_DISTRICT_NURSE_FTE","TOTAL_N_NURSE_DISP_FTE",
+            "TOTAL_DPC_HC","TOTAL_DPC_DISPENSER_HC","TOTAL_DPC_HCA_HC","TOTAL_DPC_PHLEB_HC","TOTAL_DPC_PHARMA_HC","TOTAL_DPC_PHYSIO_HC","TOTAL_DPC_PODIA_HC","TOTAL_DPC_PHYSICIAN_ASSOC_HC","TOTAL_DPC_OTH_HC",
+            "TOTAL_DPC_FTE","TOTAL_DPC_DISPENSER_FTE","TOTAL_DPC_HCA_FTE","TOTAL_DPC_PHLEB_FTE","TOTAL_DPC_PHARMA_FTE","TOTAL_DPC_PHYSIO_FTE","TOTAL_DPC_PODIA_FTE","TOTAL_DPC_PHYSICIAN_ASSOC_FTE","TOTAL_DPC_OTH_FTE",
+            "TOTAL_ADMIN_HC","TOTAL_ADMIN_MANAGER_HC","TOTAL_ADMIN_MED_SECRETARY_HC","TOTAL_ADMIN_RECEPT_HC","TOTAL_ADMIN_TELEPH_HC","TOTAL_ADMIN_ESTATES_ANC_HC","TOTAL_ADMIN_OTH_HC",
+            "TOTAL_ADMIN_FTE","TOTAL_ADMIN_MANAGER_FTE","TOTAL_ADMIN_MED_SECRETARY_FTE","TOTAL_ADMIN_RECEPT_FTE","TOTAL_ADMIN_TELEPH_FTE","TOTAL_ADMIN_ESTATES_ANC_FTE","TOTAL_ADMIN_OTH_FTE")
+  
+  for (variable in gp_vars) {
+    print(variable)
+    gp_workforce_nested = gp_workforce_imputed %>% 
+      group_by(PRAC_CODE) %>%
+      nest()
+    gp_workforce_imputed = map_linear_impute(gp_workforce_nested, variable, median(gp_workforce[[variable]], na.rm=TRUE))
+  }
+  
+  dbWriteTable(conn=db, name="gp_workforce_newdata_imputed", gp_workforce_imputed, overwrite=TRUE)
+  dbDisconnect(db)
+  
+}
+write_workforce_data_to_db_new = function(database_name="primary_care_data.sqlite3"){
+  gp_vars=c("TOTAL_GP_HC","TOTAL_GP_EXL_HC","TOTAL_GP_EXRL_HC","TOTAL_GP_EXRRL_HC","TOTAL_GP_SEN_PTNR_HC","TOTAL_GP_PTNR_PROV_HC","TOTAL_GP_SAL_BY_PRAC_HC","TOTAL_GP_SAL_BY_OTH_HC","TOTAL_GP_REG_ST3_4_HC","TOTAL_GP_REG_F1_2_HC","TOTAL_GP_RET_HC","TOTAL_GP_LOCUM_VAC_HC","TOTAL_GP_LOCUM_ABS_HC","TOTAL_GP_LOCUM_OTH_HC",
+          "MALE_GP_EXRRL_HC","MALE_GP_REG_ST3_4_HC","MALE_GP_RET_HC","FEMALE_GP_EXRRL_HC","FEMALE_GP_REG_ST3_4_HC","FEMALE_GP_RET_HC",
+          "TOTAL_GP_FTE","TOTAL_GP_EXL_FTE","TOTAL_GP_EXRL_FTE","TOTAL_GP_EXRRL_FTE","TOTAL_GP_SEN_PTNR_FTE","TOTAL_GP_PTNR_PROV_FTE","TOTAL_GP_SAL_BY_PRAC_FTE","TOTAL_GP_SAL_BY_OTH_FTE","TOTAL_GP_REG_ST3_4_FTE","TOTAL_GP_REG_F1_2_FTE","TOTAL_GP_RET_FTE","TOTAL_GP_LOCUM_VAC_FTE","TOTAL_GP_LOCUM_ABS_FTE","TOTAL_GP_LOCUM_OTH_FTE",
+          "MALE_GP_EXRRL_FTE","MALE_GP_REG_ST3_4_FTE","MALE_GP_RET_FTE","FEMALE_GP_EXRRL_FTE","FEMALE_GP_REG_ST3_4_FTE","FEMALE_GP_RET_FTE",
+          "MALE_GP_EXRRL_HC_UNDER30","MALE_GP_EXRRL_HC_30TO34","MALE_GP_EXRRL_HC_35TO39","MALE_GP_EXRRL_HC_40TO44","MALE_GP_EXRRL_HC_45TO49","MALE_GP_EXRRL_HC_50TO54","MALE_GP_EXRRL_HC_55TO59","MALE_GP_EXRRL_HC_60TO64","MALE_GP_EXRRL_HC_65TO69","MALE_GP_EXRRL_HC_70PLUS","MALE_GP_EXRRL_HC_UNKNOWN_AGE",
+          "FEMALE_GP_EXRRL_HC_UNDER30","FEMALE_GP_EXRRL_HC_30TO34","FEMALE_GP_EXRRL_HC_35TO39","FEMALE_GP_EXRRL_HC_40TO44","FEMALE_GP_EXRRL_HC_45TO49","FEMALE_GP_EXRRL_HC_50TO54","FEMALE_GP_EXRRL_HC_55TO59","FEMALE_GP_EXRRL_HC_60TO64","FEMALE_GP_EXRRL_HC_65TO69","FEMALE_GP_EXRRL_HC_70PLUS","FEMALE_GP_EXRRL_HC_UNKNOWN_AGE",
+          "TOTAL_NURSES_HC","TOTAL_N_PRAC_NURSE_HC","TOTAL_N_ADV_NURSE_PRAC_HC","TOTAL_N_NURSE_SPEC_HC","TOTAL_N_EXT_ROLE_NURSE_HC","TOTAL_N_TRAINEE_NURSE_HC","TOTAL_N_DISTRICT_NURSE_HC","TOTAL_N_NURSE_DISP_HC",
+          "TOTAL_NURSES_FTE","TOTAL_N_PRAC_NURSE_FTE","TOTAL_N_ADV_NURSE_PRAC_FTE","TOTAL_N_NURSE_SPEC_FTE","TOTAL_N_EXT_ROLE_NURSE_FTE","TOTAL_N_TRAINEE_NURSE_FTE","TOTAL_N_DISTRICT_NURSE_FTE","TOTAL_N_NURSE_DISP_FTE",
+          "TOTAL_DPC_HC","TOTAL_DPC_DISPENSER_HC","TOTAL_DPC_HCA_HC","TOTAL_DPC_PHLEB_HC","TOTAL_DPC_PHARMA_HC","TOTAL_DPC_PHYSIO_HC","TOTAL_DPC_PODIA_HC","TOTAL_DPC_PHYSICIAN_ASSOC_HC","TOTAL_DPC_OTH_HC",
+          "TOTAL_DPC_FTE","TOTAL_DPC_DISPENSER_FTE","TOTAL_DPC_HCA_FTE","TOTAL_DPC_PHLEB_FTE","TOTAL_DPC_PHARMA_FTE","TOTAL_DPC_PHYSIO_FTE","TOTAL_DPC_PODIA_FTE","TOTAL_DPC_PHYSICIAN_ASSOC_FTE","TOTAL_DPC_OTH_FTE",
+          "TOTAL_ADMIN_HC","TOTAL_ADMIN_MANAGER_HC","TOTAL_ADMIN_MED_SECRETARY_HC","TOTAL_ADMIN_RECEPT_HC","TOTAL_ADMIN_TELEPH_HC","TOTAL_ADMIN_ESTATES_ANC_HC","TOTAL_ADMIN_OTH_HC",
+          "TOTAL_ADMIN_FTE","TOTAL_ADMIN_MANAGER_FTE","TOTAL_ADMIN_MED_SECRETARY_FTE","TOTAL_ADMIN_RECEPT_FTE","TOTAL_ADMIN_TELEPH_FTE","TOTAL_ADMIN_ESTATES_ANC_FTE","TOTAL_ADMIN_OTH_FTE")
+
+  gp_year = list()
+  for (year in 2015:2018) {
+    wf = read_csv(paste0("raw_data/workforce/GPs 2015-2018/General Practice September ",year," Practice Level.csv"),
+                  guess_max = 100000,
+                  na=c("","NA","EST","NS",".","ND"))
+    wf = wf %>% mutate(YEAR=year)
+    
+    gp_year[[as.character(year)]] = wf %>%
+      select(YEAR,PRAC_CODE,PRAC_NAME,CONTRACT,TOTAL_PATIENTS,MALE_PATIENTS_0TO4:FEMALE_PATIENTS_85PLUS, gp_vars)
+  }
+  
+  workforce = map_dfr(gp_year,bind_rows) %>% 
+    arrange(YEAR,PRAC_CODE)
+
+  db = dbConnect(SQLite(), dbname=database_name)
+  dbWriteTable(conn=db, name="gp_workforce_newdata", workforce, overwrite=TRUE)
+  dbDisconnect(db)
+
 }
 
 
@@ -548,11 +638,57 @@ calculate_gp_per_100k_trend_by_imd_practice_level = function(database_name="prim
   
 }
 
-calculate_gp_per_100k_trend_by_imd_lsoa_level = function(database_name="primary_care_data.sqlite3", imd_aggregated=TRUE, start_year=2004, end_year=2014){
+
+calculate_missing_gp_data_per_var = function(gps, target_data, varname){
+  results = gps %>% 
+    group_by(YEAR) %>% 
+    summarise(TOTAL=sum(get(varname),na.rm=TRUE)) %>%
+    inner_join(target_data %>% select(YEAR,paste0(varname,"_TARGET"))) %>%
+    mutate(DIFF = get(paste0(varname,"_TARGET"))-TOTAL,
+           INFLATE_NON_MISSING = get(paste0(varname,"_TARGET"))/TOTAL) %>%
+    inner_join(gps %>% group_by(YEAR) %>% summarise(MISSING_N=sum(is.na(get(varname)) | get(varname)==0), NON_MISSING_N=n()-MISSING_N)) %>%
+    mutate(IMPUTE_MISSING = DIFF/MISSING_N) %>%
+    select(YEAR,INFLATE_NON_MISSING,IMPUTE_MISSING)
+  
+  return(results)
+}
+
+impute_missing_gp_data = function(gps, mode){
+  target_data = tribble(
+    ~YEAR, ~TOTAL_GP_HC_TARGET, ~TOTAL_GP_FTE_TARGET, ~TOTAL_GP_EXRRL_HC_TARGET, ~TOTAL_GP_EXRRL_FTE_TARGET,
+    2015, 39988, 33675, 34873, 28631,
+    2016, 40464, 34323, 34686, 28592,
+    2017, 39871, 33437, 34293, 27928,
+    2018, 40196, 33327, 34213, 27447
+  )
+  gps_imp = gps
+  for(varname in c("TOTAL_GP_FTE","TOTAL_GP_EXRRL_FTE")){
+    impute = calculate_missing_gp_data_per_var(gps, target_data, varname)
+    if(mode==1){
+      print("mode: 1")
+      gps_imp = gps_imp %>% left_join(impute) %>%
+        mutate(!!varname := if_else(is.na(get(varname)) | get(varname)==0,IMPUTE_MISSING,get(varname))) %>%
+        select(-INFLATE_NON_MISSING,-IMPUTE_MISSING)
+    } else if(mode==2){
+      print("mode: 2")
+      gps_imp = gps_imp %>% left_join(impute) %>%
+        mutate(!!varname := if_else(!is.na(INFLATE_NON_MISSING), get(varname) * INFLATE_NON_MISSING, get(varname))) %>% 
+        select(-INFLATE_NON_MISSING,-IMPUTE_MISSING)
+    } else {
+      print("mode: 0")
+      gps_imp = gps_imp
+    }
+  }
+  return(gps_imp)
+}
+
+calculate_gp_per_100k_trend_by_imd_lsoa_level = function(database_name="primary_care_data.sqlite3", imd_aggregated=TRUE, start_year=2004, end_year=2014, imputation_mode=0){
   db = dbConnect(SQLite(), dbname=database_name)
   gps = tbl(db, "gp_workforce") %>% 
     select(YEAR,PRAC_CODE,TOTAL_GP_EXRRL_FTE, TOTAL_GP_FTE) %>%
     collect()
+  
+  gps = impute_missing_gp_data(gps,imputation_mode)
   
   if(imd_aggregated){
     ads_imd = tbl(db, "ads_imd_props") %>% collect()
@@ -561,12 +697,24 @@ calculate_gp_per_100k_trend_by_imd_lsoa_level = function(database_name="primary_
       group_by(YEAR,PRAC_CODE,IMD_QUINTILE) %>%
       summarise(QUINTILE_PROP=sum(DECILE_PROP))
     
+    # if no ads records split GPs equally across quintiles
+    missing_ads = left_join(gps,ads_quintile) %>% 
+      filter(is.na(IMD_QUINTILE)) %>% 
+      select(-IMD_QUINTILE,-QUINTILE_PROP) %>%
+      group_by(YEAR) %>%
+      summarise(MISSING_GP_FTE=sum(TOTAL_GP_FTE,na.rm=TRUE)/5,
+                MISSING_GP_EXRRL_FTE=sum(TOTAL_GP_EXRRL_FTE,na.rm=TRUE)/5)
+      
     gps_imd_quintile = inner_join(gps,ads_quintile) %>%
       mutate(TOTAL_GP_EXRRL_FTE = QUINTILE_PROP*TOTAL_GP_EXRRL_FTE,
              TOTAL_GP_FTE = QUINTILE_PROP*TOTAL_GP_FTE) %>%
       group_by(YEAR,IMD_QUINTILE) %>%
       summarise(TOTAL_GP_EXRRL_FTE = sum(TOTAL_GP_EXRRL_FTE,na.rm=TRUE),
-                TOTAL_GP_FTE = sum(TOTAL_GP_FTE,na.rm=TRUE))
+                TOTAL_GP_FTE = sum(TOTAL_GP_FTE,na.rm=TRUE)) %>%
+      left_join(missing_ads) %>%
+      mutate(TOTAL_GP_FTE=TOTAL_GP_FTE+MISSING_GP_FTE,
+             TOTAL_GP_EXRRL_FTE=TOTAL_GP_EXRRL_FTE+MISSING_GP_EXRRL_FTE) %>%
+      select(-starts_with("MISSING"))
     
     adj_pop = tbl(db, "adj_pop_decile") %>% collect()
     adj_pop_quintile = add_quintiles(adj_pop) %>% 
@@ -594,6 +742,14 @@ calculate_gp_per_100k_trend_by_imd_lsoa_level = function(database_name="primary_
                 TOTAL_GP_FTE = sum(TOTAL_GP_FTE,na.rm=FALSE)) %>%
       inner_join(adj_pop_lsoa) %>%
       inner_join(imd)
+   
+    # if no ads records split GPs equally across quintiles
+    missing_lsoa = left_join(gps,ads_lsoa) %>% 
+      filter(is.na(LSOA11CD)) %>% 
+      select(-starts_with("LSOA")) %>%
+      group_by(YEAR) %>%
+      summarise(MISSING_GP_FTE=sum(TOTAL_GP_FTE,na.rm=TRUE)/5,
+                MISSING_GP_EXRRL_FTE=sum(TOTAL_GP_EXRRL_FTE,na.rm=TRUE)/5)
     
     gps_quintile = gps_lsoa %>% 
       drop_na(TOTAL_GP_EXRRL_FTE,TOTAL_GP_FTE,NEED_ADJ_POP,TOTAL_POP,IMD_QUINTILE) %>%
@@ -602,7 +758,11 @@ calculate_gp_per_100k_trend_by_imd_lsoa_level = function(database_name="primary_
                 TOTAL_GP_FTE = sum(TOTAL_GP_FTE),
                 NEED_ADJ_POP = sum(NEED_ADJ_POP),
                 TOTAL_POP = sum(TOTAL_POP)) %>%
-      ungroup()
+      ungroup() %>%
+      inner_join(missing_lsoa) %>%
+      mutate(TOTAL_GP_EXRRL_FTE=TOTAL_GP_EXRRL_FTE+MISSING_GP_EXRRL_FTE,
+             TOTAL_GP_FTE=TOTAL_GP_FTE+MISSING_GP_FTE) %>% 
+      select(-starts_with("MISSING"))
   }
   
   graph_data = gps_quintile %>%
@@ -672,14 +832,621 @@ calculate_gp_per_100k_trend_by_imd_lsoa_level = function(database_name="primary_
      aggregation_unit = "LSOA"
     }
   
-  ggsave(paste0("figures/gp_trends_",aggregation_unit,"_",start_year,"_",end_year,".png"), gp_plot, width=30, height=35, units="cm", dpi="print")
+  ggsave(paste0("figures/gp_trends_",aggregation_unit,"_",start_year,"_",end_year,"_",imputation_mode,".png"), gp_plot, width=35, height=35, units="cm", dpi="print")
   
   dbDisconnect(db)
 }
 
-calculate_gp_per_100k_trend_by_imd_lsoa_level(database_name="primary_care_data.sqlite3", 
-                                              imd_aggregated=FALSE, 
-                                              start_year=2015, 
-                                              end_year=2018)
+
+attribute_workforce_to_imd_lsoa_level = function(database_name="primary_care_data.sqlite3"){
+  db = dbConnect(SQLite(), dbname=database_name)
+  workforce_vars=c("TOTAL_GP_HC","TOTAL_GP_EXL_HC","TOTAL_GP_EXRL_HC","TOTAL_GP_EXRRL_HC","TOTAL_GP_SEN_PTNR_HC","TOTAL_GP_PTNR_PROV_HC","TOTAL_GP_SAL_BY_PRAC_HC","TOTAL_GP_SAL_BY_OTH_HC","TOTAL_GP_REG_ST3_4_HC","TOTAL_GP_REG_F1_2_HC","TOTAL_GP_RET_HC","TOTAL_GP_LOCUM_VAC_HC","TOTAL_GP_LOCUM_ABS_HC","TOTAL_GP_LOCUM_OTH_HC",
+            "MALE_GP_EXRRL_HC","MALE_GP_REG_ST3_4_HC","MALE_GP_RET_HC","FEMALE_GP_EXRRL_HC","FEMALE_GP_REG_ST3_4_HC","FEMALE_GP_RET_HC",
+            "TOTAL_GP_FTE","TOTAL_GP_EXL_FTE","TOTAL_GP_EXRL_FTE","TOTAL_GP_EXRRL_FTE","TOTAL_GP_SEN_PTNR_FTE","TOTAL_GP_PTNR_PROV_FTE","TOTAL_GP_SAL_BY_PRAC_FTE","TOTAL_GP_SAL_BY_OTH_FTE","TOTAL_GP_REG_ST3_4_FTE","TOTAL_GP_REG_F1_2_FTE","TOTAL_GP_RET_FTE","TOTAL_GP_LOCUM_VAC_FTE","TOTAL_GP_LOCUM_ABS_FTE","TOTAL_GP_LOCUM_OTH_FTE",
+            "MALE_GP_EXRRL_FTE","MALE_GP_REG_ST3_4_FTE","MALE_GP_RET_FTE","FEMALE_GP_EXRRL_FTE","FEMALE_GP_REG_ST3_4_FTE","FEMALE_GP_RET_FTE",
+            "MALE_GP_EXRRL_HC_UNDER30","MALE_GP_EXRRL_HC_30TO34","MALE_GP_EXRRL_HC_35TO39","MALE_GP_EXRRL_HC_40TO44","MALE_GP_EXRRL_HC_45TO49","MALE_GP_EXRRL_HC_50TO54","MALE_GP_EXRRL_HC_55TO59","MALE_GP_EXRRL_HC_60TO64","MALE_GP_EXRRL_HC_65TO69","MALE_GP_EXRRL_HC_70PLUS","MALE_GP_EXRRL_HC_UNKNOWN_AGE",
+            "FEMALE_GP_EXRRL_HC_UNDER30","FEMALE_GP_EXRRL_HC_30TO34","FEMALE_GP_EXRRL_HC_35TO39","FEMALE_GP_EXRRL_HC_40TO44","FEMALE_GP_EXRRL_HC_45TO49","FEMALE_GP_EXRRL_HC_50TO54","FEMALE_GP_EXRRL_HC_55TO59","FEMALE_GP_EXRRL_HC_60TO64","FEMALE_GP_EXRRL_HC_65TO69","FEMALE_GP_EXRRL_HC_70PLUS","FEMALE_GP_EXRRL_HC_UNKNOWN_AGE",
+            "TOTAL_NURSES_HC","TOTAL_N_PRAC_NURSE_HC","TOTAL_N_ADV_NURSE_PRAC_HC","TOTAL_N_NURSE_SPEC_HC","TOTAL_N_EXT_ROLE_NURSE_HC","TOTAL_N_TRAINEE_NURSE_HC","TOTAL_N_DISTRICT_NURSE_HC","TOTAL_N_NURSE_DISP_HC",
+            "TOTAL_NURSES_FTE","TOTAL_N_PRAC_NURSE_FTE","TOTAL_N_ADV_NURSE_PRAC_FTE","TOTAL_N_NURSE_SPEC_FTE","TOTAL_N_EXT_ROLE_NURSE_FTE","TOTAL_N_TRAINEE_NURSE_FTE","TOTAL_N_DISTRICT_NURSE_FTE","TOTAL_N_NURSE_DISP_FTE",
+            "TOTAL_DPC_HC","TOTAL_DPC_DISPENSER_HC","TOTAL_DPC_HCA_HC","TOTAL_DPC_PHLEB_HC","TOTAL_DPC_PHARMA_HC","TOTAL_DPC_PHYSIO_HC","TOTAL_DPC_PODIA_HC","TOTAL_DPC_PHYSICIAN_ASSOC_HC","TOTAL_DPC_OTH_HC",
+            "TOTAL_DPC_FTE","TOTAL_DPC_DISPENSER_FTE","TOTAL_DPC_HCA_FTE","TOTAL_DPC_PHLEB_FTE","TOTAL_DPC_PHARMA_FTE","TOTAL_DPC_PHYSIO_FTE","TOTAL_DPC_PODIA_FTE","TOTAL_DPC_PHYSICIAN_ASSOC_FTE","TOTAL_DPC_OTH_FTE",
+            "TOTAL_ADMIN_HC","TOTAL_ADMIN_MANAGER_HC","TOTAL_ADMIN_MED_SECRETARY_HC","TOTAL_ADMIN_RECEPT_HC","TOTAL_ADMIN_TELEPH_HC","TOTAL_ADMIN_ESTATES_ANC_HC","TOTAL_ADMIN_OTH_HC",
+            "TOTAL_ADMIN_FTE","TOTAL_ADMIN_MANAGER_FTE","TOTAL_ADMIN_MED_SECRETARY_FTE","TOTAL_ADMIN_RECEPT_FTE","TOTAL_ADMIN_TELEPH_FTE","TOTAL_ADMIN_ESTATES_ANC_FTE","TOTAL_ADMIN_OTH_FTE")
+  
+  gps = tbl(db, "gp_workforce_newdata_imputed") %>% 
+    select(YEAR,PRAC_CODE,workforce_vars) %>%
+    collect()
+  
+    ads_lsoa = tbl(db, "ads_lsoa_props") %>% filter(YEAR>2014) %>% collect()
+    
+    adj_pop_lsoa = tbl(db, "carr_hill_pop") %>% filter(YEAR>2014) %>% collect()
+    
+    imd = tbl(db, "imd_2015") %>% 
+      filter(DIMENSION=="OVERALL" & MEASURE=="Decile") %>%
+      select(LSOA11CD,IMD_DECILE=VALUE) %>%
+      collect() %>% add_quintiles()
+    
+    # drops LSOAs in Wales and NO2011 which seems to be some NHS digital null code
+    gps_lsoa = inner_join(gps,ads_lsoa) %>%
+      mutate_at(vars(one_of(workforce_vars)), ~(.*LSOA_PROP)) %>%
+      group_by(YEAR,LSOA11CD) %>%
+      summarise_at(vars(one_of(workforce_vars)), sum, na.rm=TRUE) %>%
+      inner_join(adj_pop_lsoa) %>%
+      inner_join(imd)
+    
+    dbWriteTable(conn=db, name="gp_workforce_newdata_imputed_lsoa", gps_lsoa, overwrite=TRUE)
+    
+    gp_imd = tbl(db, "gp_imd_2015") %>% collect() %>% add_quintiles() %>% select(PRAC_CODE,IMD_QUINTILE)
+    
+    # some practices do not have LSOAs associated with them in ADS data so: 
+    # (a) for those that have practice IMD use that 
+    # (b) for those that do not have practive IMD split GPs equally across quintiles
+    missing_lsoa_a = left_join(crossing(tibble(YEAR=2015:2018), tibble(IMD_QUINTILE=1:5)),
+      left_join(gps,ads_lsoa) %>% 
+      filter(is.na(LSOA11CD)) %>%
+      left_join(gp_imd) %>%
+      filter(!is.na(IMD_QUINTILE)) %>%
+      select(one_of(workforce_vars),YEAR, IMD_QUINTILE) %>%
+      group_by(YEAR, IMD_QUINTILE) %>%
+      summarise_at(vars(one_of(workforce_vars)), sum, na.rm=TRUE) %>%
+      ungroup()) %>%
+      replace(is.na(.), 0) %>%
+      arrange(YEAR,IMD_QUINTILE)
+    
+    missing_lsoa_b = inner_join(crossing(tibble(YEAR=2015:2018), tibble(IMD_QUINTILE=1:5)),
+                                left_join(gps,ads_lsoa) %>% 
+                                  filter(is.na(LSOA11CD)) %>%
+                                  left_join(gp_imd) %>%
+                                  filter(is.na(IMD_QUINTILE)) %>%
+                                  select(one_of(workforce_vars),YEAR) %>%
+                                  group_by(YEAR) %>%
+                                  summarise_at(vars(one_of(workforce_vars)), sum, na.rm=TRUE) %>%
+                                  mutate_at(vars(one_of(workforce_vars)), ~(./5))) %>%
+      ungroup() %>%
+      arrange(YEAR,IMD_QUINTILE)
+    
+    gps_quintile = gps_lsoa %>% 
+      group_by(YEAR,IMD_QUINTILE) %>%
+      summarise_at(vars(one_of(c(workforce_vars,"NEED_ADJ_POP","TOTAL_POP"))), sum, na.rm=TRUE) %>%
+      ungroup() %>%
+      arrange(YEAR,IMD_QUINTILE)
+    
+    missing_quintiles = missing_lsoa_a
+    missing_quintiles[,workforce_vars] = missing_lsoa_a[,workforce_vars] + missing_lsoa_b[,workforce_vars]
+    
+    dbWriteTable(conn=db, name="gp_workforce_missing_imd_quintiles", missing_quintiles, overwrite=TRUE)
+    
+    gps_quintile[,workforce_vars] = gps_quintile[,workforce_vars] + missing_quintiles[,workforce_vars]
+    
+    dbWriteTable(conn=db, name="gp_workforce_imd_quintiles", gps_quintile, overwrite=TRUE)
+    dbDisconnect(db)
+}
+
+graph_population_trends = function(database_name="primary_care_data.sqlite3"){
+  db = dbConnect(SQLite(), dbname=database_name)
+  population = tbl(db, "gp_workforce_imd_quintiles") %>% select(YEAR,IMD_QUINTILE,TOTAL_POP,NEED_ADJ_POP) %>% collect() 
+  dbDisconnect(db)
+  
+  graph_data = population %>% gather(POP_TYPE,POP,contains("POP")) %>%
+    mutate(POP_TYPE = factor(POP_TYPE,c("TOTAL_POP","NEED_ADJ_POP"),c("Total Population","Need Adjusted Population")),
+           IMD_QUINTILE = factor(IMD_QUINTILE,1:5, c("Q1 (most deprived)","Q2","Q3","Q4","Q5 (least deprived)")))
+  
+  imd_labels = c("Q1 (most deprived)","Q2","Q3","Q4","Q5 (least deprived)")
+  start_year=2015
+  end_year=2018
+  pop_plot = ggplot(graph_data) + 
+    aes(x=YEAR, y=POP, group=IMD_QUINTILE, colour=IMD_QUINTILE) + 
+    geom_line(aes(linetype=IMD_QUINTILE, size=IMD_QUINTILE)) + 
+    geom_point(aes(shape=IMD_QUINTILE, colour=IMD_QUINTILE)) +
+    xlab("Year") +
+    ylab("") +
+    facet_wrap(POP_TYPE~.,scales="fixed",labeller = labeller(POP_TYPE = label_wrap_gen(40))) +
+    scale_y_continuous(labels = comma) +
+    scale_x_continuous(breaks=start_year:end_year, labels=paste(str_sub(start_year:end_year,3), str_sub((start_year+1):(end_year+1),3),sep="/")) +
+    scale_colour_manual(name="IMD Quintile Group", values=c("black","lightblue","lightblue","lightblue","darkgrey"), labels=imd_labels) +
+    scale_shape_manual(name="IMD Quintile Group", values=c(19,21,24,0,15), labels=imd_labels) +
+    scale_linetype_manual(name="IMD Quintile Group", values=c(1,2,2,2,1), labels=imd_labels) +
+    scale_size_manual(name="IMD Quintile Group", values=c(1,0.5,0.5,0.5,1), labels=imd_labels) +
+    theme_bw() + 
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          plot.margin = unit(c(1, 1, 1, 1), "lines"),
+          text=element_text(family = "Roboto", colour = "#3e3f3a"),
+          legend.position = "bottom") +
+    labs(title = "Trends in population by neighbourhood deprivation",
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
+  
+  ggsave(paste0("figures/pop_trends.png"), pop_plot, width=25, height=10, units="cm", dpi="print")
+  
+}
+
+graph_gp_trends = function(database_name="primary_care_data.sqlite3"){
+  db = dbConnect(SQLite(), dbname=database_name)
+  gps_quintile = tbl(db, "gp_workforce_imd_quintiles") %>% collect() 
+  dbDisconnect(db)
+  
+  graph_data = gps_quintile %>%
+    select(YEAR,IMD_QUINTILE,TOTAL_POP,NEED_ADJ_POP,
+           TOTAL_GP_HC,
+           TOTAL_GPEXRRL_HC=TOTAL_GP_EXRRL_HC,TOTAL_GPREGST34_HC=TOTAL_GP_REG_ST3_4_HC,
+           TOTAL_GPRET_HC = TOTAL_GP_RET_HC,
+           TOTAL_GP_LOCUM_ABS_HC,TOTAL_GP_LOCUM_VAC_HC,TOTAL_GP_LOCUM_OTH_HC,
+           TOTAL_GP_FTE,
+           TOTAL_GPEXRRL_FTE=TOTAL_GP_EXRRL_FTE,TOTAL_GPREGST34_FTE=TOTAL_GP_REG_ST3_4_FTE,
+           TOTAL_GPRET_FTE = TOTAL_GP_RET_FTE,
+           TOTAL_GP_LOCUM_ABS_FTE,TOTAL_GP_LOCUM_VAC_FTE,TOTAL_GP_LOCUM_OTH_FTE) %>% 
+    mutate(TOTAL_GPLOCUM_HC=TOTAL_GP_LOCUM_ABS_HC+TOTAL_GP_LOCUM_VAC_HC+TOTAL_GP_LOCUM_OTH_HC,
+              TOTAL_GPLOCUM_FTE=TOTAL_GP_LOCUM_ABS_FTE+TOTAL_GP_LOCUM_VAC_FTE+TOTAL_GP_LOCUM_OTH_FTE) %>%
+    select(-contains("GP_LOCUM")) %>%
+    gather(VARIABLE,VALUE,TOTAL_GP_HC:TOTAL_GPLOCUM_FTE) %>%
+    separate(VARIABLE,c("x","VARIABLE","TYPE")) %>%
+    select(-x) %>%
+    mutate(IMD_QUINTILE = factor(IMD_QUINTILE,1:5, c("Q1 (most deprived)","Q2","Q3","Q4","Q5 (least deprived)")),
+           TYPE = factor(TYPE, c("HC","FTE"),c("Headcount","Full time equivalent")),
+           VARIABLE = factor(VARIABLE,
+                             c("GP","GPEXRRL","GPREGST34","GPRET","GPLOCUM"),
+                             c("All GPs","GPs excluding registrars, retainers and locums","GP registrars (ST3-4)","GP retainers","GP locums")))
+   
+    
+  imd_labels = c("Q1 (most deprived)","Q2","Q3","Q4","Q5 (least deprived)")
+  start_year=2015
+  end_year=2018
+  gp_plot_raw = ggplot(graph_data) + 
+    aes(x=YEAR, y=VALUE, group=IMD_QUINTILE, colour=IMD_QUINTILE) + 
+    geom_line(aes(linetype=IMD_QUINTILE, size=IMD_QUINTILE)) + 
+    geom_point(aes(shape=IMD_QUINTILE, colour=IMD_QUINTILE)) +
+    xlab("Year") +
+    ylab("") +
+    scale_y_continuous(labels = comma) +
+    scale_x_continuous(breaks=start_year:end_year, labels=paste(str_sub(start_year:end_year,3), str_sub((start_year+1):(end_year+1),3),sep="/")) +
+    scale_colour_manual(name="IMD Quintile Group", values=c("black","lightblue","lightblue","lightblue","darkgrey"), labels=imd_labels) +
+    scale_shape_manual(name="IMD Quintile Group", values=c(19,21,24,0,15), labels=imd_labels) +
+    scale_linetype_manual(name="IMD Quintile Group", values=c(1,2,2,2,1), labels=imd_labels) +
+    scale_size_manual(name="IMD Quintile Group", values=c(1,0.5,0.5,0.5,1), labels=imd_labels) +
+    facet_grid(VARIABLE~TYPE,scales="free",labeller = labeller(VARIABLE = label_wrap_gen(40))) +
+    theme_bw() + 
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          plot.margin = unit(c(1, 1, 1, 1), "lines"),
+          text=element_text(family = "Roboto", colour = "#3e3f3a"),
+          legend.position = "bottom") +
+    labs(title = "Trends in GP supply by neighbourhood deprivation",
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
+  
+    ggsave(paste0("figures/gp_trends_raw.png"), gp_plot_raw, width=25, height=35, units="cm", dpi="print")
+  
+    gp_plot_pop = ggplot(graph_data) + 
+      aes(x=YEAR, y=(100000*VALUE/TOTAL_POP), group=IMD_QUINTILE, colour=IMD_QUINTILE) + 
+      geom_line(aes(linetype=IMD_QUINTILE, size=IMD_QUINTILE)) + 
+      geom_point(aes(shape=IMD_QUINTILE, colour=IMD_QUINTILE)) +
+      xlab("Year") +
+      ylab("") +
+      scale_y_continuous(labels = comma) +
+      scale_x_continuous(breaks=start_year:end_year, labels=paste(str_sub(start_year:end_year,3), str_sub((start_year+1):(end_year+1),3),sep="/")) +
+      scale_colour_manual(name="IMD Quintile Group", values=c("black","lightblue","lightblue","lightblue","darkgrey"), labels=imd_labels) +
+      scale_shape_manual(name="IMD Quintile Group", values=c(19,21,24,0,15), labels=imd_labels) +
+      scale_linetype_manual(name="IMD Quintile Group", values=c(1,2,2,2,1), labels=imd_labels) +
+      scale_size_manual(name="IMD Quintile Group", values=c(1,0.5,0.5,0.5,1), labels=imd_labels) +
+      facet_grid(VARIABLE~TYPE,scales="free",labeller = labeller(VARIABLE = label_wrap_gen(40))) +
+      theme_bw() + 
+      theme(panel.grid.major = element_blank(), 
+            panel.grid.minor = element_blank(), 
+            plot.margin = unit(c(1, 1, 1, 1), "lines"),
+            text=element_text(family = "Roboto", colour = "#3e3f3a"),
+            legend.position = "bottom") +
+      labs(title = "Trends in GP supply per 100,000 population by neighbourhood deprivation",
+           subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+           caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
+    
+    ggsave(paste0("figures/gp_trends_pop.png"), gp_plot_pop, width=25, height=35, units="cm", dpi="print")
+    
+    gp_plot_pop_adj = ggplot(graph_data) + 
+      aes(x=YEAR, y=(100000*VALUE/NEED_ADJ_POP), group=IMD_QUINTILE, colour=IMD_QUINTILE) + 
+      geom_line(aes(linetype=IMD_QUINTILE, size=IMD_QUINTILE)) + 
+      geom_point(aes(shape=IMD_QUINTILE, colour=IMD_QUINTILE)) +
+      xlab("Year") +
+      ylab("") +
+      scale_y_continuous(labels = comma) +
+      scale_x_continuous(breaks=start_year:end_year, labels=paste(str_sub(start_year:end_year,3), str_sub((start_year+1):(end_year+1),3),sep="/")) +
+      scale_colour_manual(name="IMD Quintile Group", values=c("black","lightblue","lightblue","lightblue","darkgrey"), labels=imd_labels) +
+      scale_shape_manual(name="IMD Quintile Group", values=c(19,21,24,0,15), labels=imd_labels) +
+      scale_linetype_manual(name="IMD Quintile Group", values=c(1,2,2,2,1), labels=imd_labels) +
+      scale_size_manual(name="IMD Quintile Group", values=c(1,0.5,0.5,0.5,1), labels=imd_labels) +
+      facet_grid(VARIABLE~TYPE,scales="free",labeller = labeller(VARIABLE = label_wrap_gen(40))) +
+      theme_bw() + 
+      theme(panel.grid.major = element_blank(), 
+            panel.grid.minor = element_blank(), 
+            plot.margin = unit(c(1, 1, 1, 1), "lines"),
+            text=element_text(family = "Roboto", colour = "#3e3f3a"),
+            legend.position = "bottom") +
+      labs(title = "Trends in GP supply per 100,000 need adjusted population by neighbourhood deprivation",
+           subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+           caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
+    
+    ggsave(paste0("figures/gp_trends_pop_adj.png"), gp_plot_pop_adj, width=25, height=35, units="cm", dpi="print")
+}
+
+graph_gp_age_sex = function(database_name="primary_care_data.sqlite3", year=2018){
+  db = dbConnect(SQLite(), dbname=database_name)
+  gps_quintile = tbl(db, "gp_workforce_imd_quintiles") %>% collect() %>% filter(YEAR==year) %>% select(IMD_QUINTILE,NEED_ADJ_POP,TOTAL_POP,contains("_HC_"))
+  dbDisconnect(db)
+  
+  graph_data = gps_quintile %>% gather(VARNAME,VALUE,MALE_GP_EXRRL_HC_UNDER30:FEMALE_GP_EXRRL_HC_UNKNOWN_AGE) %>%
+    separate(VARNAME,c("SEX","A","B","C","AGE")) %>%
+    select(IMD_QUINTILE, NEED_ADJ_POP,TOTAL_POP,SEX,AGE,GP_EXRRL_HC=VALUE) %>%
+    mutate(IMD_QUINTILE = factor(IMD_QUINTILE,1:5, c("Q1 (most deprived)","Q2","Q3","Q4","Q5 (least deprived)")),
+           AGE = factor(AGE,
+                        c("UNDER30","30TO34","35TO39","40TO44","45TO49","50TO54","55TO59","60TO64","65TO69","70PLUS","UNKNOWN"),
+                        c("<30","30-34","35-39","40-44","45-49","50-54","55-59","60-64","65-69","70+","Unknown")),
+           SEX = factor(SEX,c("FEMALE","MALE"),c("Female","Male")))
+  
+  gp_plot = ggplot(graph_data, aes(x=AGE, y=GP_EXRRL_HC)) +
+    geom_bar(stat="identity") +
+    facet_grid(SEX ~ IMD_QUINTILE) +
+    theme_bw() + 
+    ylab("GPs excluding registrars, retainers and locums (headcount)") +
+    xlab("Age of GPs") +
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          plot.margin = unit(c(1, 1, 1, 1), "lines"),
+          axis.text.x = element_text(angle = 90, hjust = 1)) +
+    labs(title = "Age/Sex distribution of GP supply by neighbourhood deprivation quintile",
+         subtitle = paste0("Data for England in years ",year," based on IMD 2015 quintiles"),
+         caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
   
   
+  ggsave(paste0("figures/gp_age_sex_",year,".png"), gp_plot, width=35, height=25, units="cm", dpi="print")
+  
+  gp_plot_pop = ggplot(graph_data, aes(x=AGE, y=(100000*GP_EXRRL_HC/TOTAL_POP))) +
+    geom_bar(stat="identity") +
+    facet_grid(SEX ~ IMD_QUINTILE) +
+    theme_bw() + 
+    ylab("GPs excluding registrars, retainers and locums (headcount per 100,000 population)") +
+    xlab("Age of GPs") +
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          plot.margin = unit(c(1, 1, 1, 1), "lines"),
+          axis.text.x = element_text(angle = 90, hjust = 1)) +
+    labs(title = "Age/Sex distribution of GP supply per 100,000 population by neighbourhood deprivation quintile",
+         subtitle = paste0("Data for England in years ",year," based on IMD 2015 quintiles"),
+         caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
+  
+  
+  ggsave(paste0("figures/gp_age_sex_pop_",year,".png"), gp_plot_pop, width=35, height=25, units="cm", dpi="print")
+  
+  gp_plot_pop_adj = ggplot(graph_data, aes(x=AGE, y=(100000*GP_EXRRL_HC/NEED_ADJ_POP))) +
+    geom_bar(stat="identity") +
+    facet_grid(SEX ~ IMD_QUINTILE) +
+    theme_bw() + 
+    ylab("GPs excluding registrars, retainers and locums (headcount per 100,000 need adjusted population)") +
+    xlab("Age of GPs") +
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          plot.margin = unit(c(1, 1, 1, 1), "lines"),
+          axis.text.x = element_text(angle = 90, hjust = 1)) +
+    labs(title = "Age/Sex distribution of GP supply per 100,000 need adjusted population by neighbourhood deprivation quintile",
+         subtitle = paste0("Data for England in years ",year," based on IMD 2015 quintiles"),
+         caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
+  
+  
+  ggsave(paste0("figures/gp_age_sex_pop_adj_",year,".png"), gp_plot_pop_adj, width=35, height=25, units="cm", dpi="print")
+}
+
+graph_gp_trends_by_sex = function(database_name="primary_care_data.sqlite3"){
+  db = dbConnect(SQLite(), dbname=database_name)
+  gps_quintile = tbl(db, "gp_workforce_imd_quintiles") %>% collect() 
+  dbDisconnect(db)
+  
+  graph_data = gps_quintile %>%
+    select(YEAR,IMD_QUINTILE,TOTAL_POP,NEED_ADJ_POP,
+           contains("MALE")) %>% 
+    select(-contains("_HC_")) %>%
+    gather(VARIABLE,VALUE,MALE_GP_EXRRL_HC:FEMALE_GP_RET_FTE) %>%
+    mutate(VARIABLE = gsub("REG_ST3_4","REGST34",VARIABLE),
+            VARIABLE = gsub("_GP_","_",VARIABLE)) %>%
+    separate(VARIABLE,c("SEX","VARIABLE","TYPE")) %>%
+    mutate(IMD_QUINTILE = factor(IMD_QUINTILE,1:5, c("Q1 (most deprived)","Q2","Q3","Q4","Q5 (least deprived)")),
+           TYPE = factor(TYPE, c("HC","FTE"),c("Headcount","Full time equivalent")),
+           SEX = factor(SEX,c("FEMALE","MALE"),c("Female","Male")),
+           VARIABLE = factor(VARIABLE,
+                             c("EXRRL","REGST34","RET"),
+                             c("GPs excluding registrars, retainers and locums","GP registrars (ST3-4)","GP retainers")))
+  
+  
+  imd_labels = c("Q1 (most deprived)","Q2","Q3","Q4","Q5 (least deprived)")
+  start_year=2015
+  end_year=2018
+  gp_plot_sex_hc_raw = ggplot(graph_data %>% filter(TYPE=="Headcount")) + 
+    aes(x=YEAR, y=VALUE, group=IMD_QUINTILE, colour=IMD_QUINTILE) + 
+    geom_line(aes(linetype=IMD_QUINTILE, size=IMD_QUINTILE)) + 
+    geom_point(aes(shape=IMD_QUINTILE, colour=IMD_QUINTILE)) +
+    xlab("Year") +
+    ylab("GP headcount") +
+    scale_y_continuous(labels = comma) +
+    scale_x_continuous(breaks=start_year:end_year, labels=paste(str_sub(start_year:end_year,3), str_sub((start_year+1):(end_year+1),3),sep="/")) +
+    scale_colour_manual(name="IMD Quintile Group", values=c("black","lightblue","lightblue","lightblue","darkgrey"), labels=imd_labels) +
+    scale_shape_manual(name="IMD Quintile Group", values=c(19,21,24,0,15), labels=imd_labels) +
+    scale_linetype_manual(name="IMD Quintile Group", values=c(1,2,2,2,1), labels=imd_labels) +
+    scale_size_manual(name="IMD Quintile Group", values=c(1,0.5,0.5,0.5,1), labels=imd_labels) +
+    facet_grid(VARIABLE~SEX,scales="free",labeller = labeller(VARIABLE = label_wrap_gen(40))) +
+    theme_bw() + 
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          plot.margin = unit(c(1, 1, 1, 1), "lines"),
+          text=element_text(family = "Roboto", colour = "#3e3f3a"),
+          legend.position = "bottom") +
+    labs(title = "Trends in GP supply by neighbourhood deprivation",
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
+  
+  ggsave(paste0("figures/gp_trends_sex_hc_raw.png"), gp_plot_sex_hc_raw, width=25, height=30, units="cm", dpi="print")
+  
+
+  gp_plot_sex_fte_raw = ggplot(graph_data %>% filter(TYPE=="Full time equivalent")) + 
+    aes(x=YEAR, y=VALUE, group=IMD_QUINTILE, colour=IMD_QUINTILE) + 
+    geom_line(aes(linetype=IMD_QUINTILE, size=IMD_QUINTILE)) + 
+    geom_point(aes(shape=IMD_QUINTILE, colour=IMD_QUINTILE)) +
+    xlab("Year") +
+    ylab("GP full time equivalent") +
+    scale_y_continuous(labels = comma) +
+    scale_x_continuous(breaks=start_year:end_year, labels=paste(str_sub(start_year:end_year,3), str_sub((start_year+1):(end_year+1),3),sep="/")) +
+    scale_colour_manual(name="IMD Quintile Group", values=c("black","lightblue","lightblue","lightblue","darkgrey"), labels=imd_labels) +
+    scale_shape_manual(name="IMD Quintile Group", values=c(19,21,24,0,15), labels=imd_labels) +
+    scale_linetype_manual(name="IMD Quintile Group", values=c(1,2,2,2,1), labels=imd_labels) +
+    scale_size_manual(name="IMD Quintile Group", values=c(1,0.5,0.5,0.5,1), labels=imd_labels) +
+    facet_grid(VARIABLE~SEX,scales="free",labeller = labeller(VARIABLE = label_wrap_gen(40))) +
+    theme_bw() + 
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          plot.margin = unit(c(1, 1, 1, 1), "lines"),
+          text=element_text(family = "Roboto", colour = "#3e3f3a"),
+          legend.position = "bottom") +
+    labs(title = "Trends in GP supply by neighbourhood deprivation",
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
+  
+  ggsave(paste0("figures/gp_trends_sex_fte_raw.png"), gp_plot_sex_fte_raw, width=25, height=30, units="cm", dpi="print")
+
+  
+  gp_plot_sex_hc_pop = ggplot(graph_data %>% filter(TYPE=="Headcount")) + 
+    aes(x=YEAR, y=(100000*VALUE/TOTAL_POP), group=IMD_QUINTILE, colour=IMD_QUINTILE) + 
+    geom_line(aes(linetype=IMD_QUINTILE, size=IMD_QUINTILE)) + 
+    geom_point(aes(shape=IMD_QUINTILE, colour=IMD_QUINTILE)) +
+    xlab("Year") +
+    ylab("GP headcount per 100,000 population") +
+    scale_y_continuous(labels = comma) +
+    scale_x_continuous(breaks=start_year:end_year, labels=paste(str_sub(start_year:end_year,3), str_sub((start_year+1):(end_year+1),3),sep="/")) +
+    scale_colour_manual(name="IMD Quintile Group", values=c("black","lightblue","lightblue","lightblue","darkgrey"), labels=imd_labels) +
+    scale_shape_manual(name="IMD Quintile Group", values=c(19,21,24,0,15), labels=imd_labels) +
+    scale_linetype_manual(name="IMD Quintile Group", values=c(1,2,2,2,1), labels=imd_labels) +
+    scale_size_manual(name="IMD Quintile Group", values=c(1,0.5,0.5,0.5,1), labels=imd_labels) +
+    facet_grid(VARIABLE~SEX,scales="free",labeller = labeller(VARIABLE = label_wrap_gen(40))) +
+    theme_bw() + 
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          plot.margin = unit(c(1, 1, 1, 1), "lines"),
+          text=element_text(family = "Roboto", colour = "#3e3f3a"),
+          legend.position = "bottom") +
+    labs(title = "Trends in GP supply by neighbourhood deprivation",
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
+  
+  ggsave(paste0("figures/gp_trends_sex_hc_pop.png"), gp_plot_sex_hc_pop, width=25, height=30, units="cm", dpi="print")
+  
+  
+  gp_plot_sex_fte_pop = ggplot(graph_data %>% filter(TYPE=="Full time equivalent")) + 
+    aes(x=YEAR, y=(100000*VALUE/TOTAL_POP), group=IMD_QUINTILE, colour=IMD_QUINTILE) + 
+    geom_line(aes(linetype=IMD_QUINTILE, size=IMD_QUINTILE)) + 
+    geom_point(aes(shape=IMD_QUINTILE, colour=IMD_QUINTILE)) +
+    xlab("Year") +
+    ylab("GP full time equivalent per 100,000 population") +
+    scale_y_continuous(labels = comma) +
+    scale_x_continuous(breaks=start_year:end_year, labels=paste(str_sub(start_year:end_year,3), str_sub((start_year+1):(end_year+1),3),sep="/")) +
+    scale_colour_manual(name="IMD Quintile Group", values=c("black","lightblue","lightblue","lightblue","darkgrey"), labels=imd_labels) +
+    scale_shape_manual(name="IMD Quintile Group", values=c(19,21,24,0,15), labels=imd_labels) +
+    scale_linetype_manual(name="IMD Quintile Group", values=c(1,2,2,2,1), labels=imd_labels) +
+    scale_size_manual(name="IMD Quintile Group", values=c(1,0.5,0.5,0.5,1), labels=imd_labels) +
+    facet_grid(VARIABLE~SEX,scales="free",labeller = labeller(VARIABLE = label_wrap_gen(40))) +
+    theme_bw() + 
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          plot.margin = unit(c(1, 1, 1, 1), "lines"),
+          text=element_text(family = "Roboto", colour = "#3e3f3a"),
+          legend.position = "bottom") +
+    labs(title = "Trends in GP supply by neighbourhood deprivation",
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
+  
+  ggsave(paste0("figures/gp_trends_sex_fte_pop.png"), gp_plot_sex_fte_pop, width=25, height=30, units="cm", dpi="print")
+  
+  
+  gp_plot_sex_hc_pop_adj = ggplot(graph_data %>% filter(TYPE=="Headcount")) + 
+    aes(x=YEAR, y=(100000*VALUE/NEED_ADJ_POP), group=IMD_QUINTILE, colour=IMD_QUINTILE) + 
+    geom_line(aes(linetype=IMD_QUINTILE, size=IMD_QUINTILE)) + 
+    geom_point(aes(shape=IMD_QUINTILE, colour=IMD_QUINTILE)) +
+    xlab("Year") +
+    ylab("GP headcount per 100,000 need adjusted population") +
+    scale_y_continuous(labels = comma) +
+    scale_x_continuous(breaks=start_year:end_year, labels=paste(str_sub(start_year:end_year,3), str_sub((start_year+1):(end_year+1),3),sep="/")) +
+    scale_colour_manual(name="IMD Quintile Group", values=c("black","lightblue","lightblue","lightblue","darkgrey"), labels=imd_labels) +
+    scale_shape_manual(name="IMD Quintile Group", values=c(19,21,24,0,15), labels=imd_labels) +
+    scale_linetype_manual(name="IMD Quintile Group", values=c(1,2,2,2,1), labels=imd_labels) +
+    scale_size_manual(name="IMD Quintile Group", values=c(1,0.5,0.5,0.5,1), labels=imd_labels) +
+    facet_grid(VARIABLE~SEX,scales="free",labeller = labeller(VARIABLE = label_wrap_gen(40))) +
+    theme_bw() + 
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          plot.margin = unit(c(1, 1, 1, 1), "lines"),
+          text=element_text(family = "Roboto", colour = "#3e3f3a"),
+          legend.position = "bottom") +
+    labs(title = "Trends in GP supply by neighbourhood deprivation",
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
+  
+  ggsave(paste0("figures/gp_trends_sex_hc_pop_adj.png"), gp_plot_sex_hc_pop_adj, width=25, height=30, units="cm", dpi="print")
+  
+  
+  gp_plot_sex_fte_pop_adj = ggplot(graph_data %>% filter(TYPE=="Full time equivalent")) + 
+    aes(x=YEAR, y=(100000*VALUE/NEED_ADJ_POP), group=IMD_QUINTILE, colour=IMD_QUINTILE) + 
+    geom_line(aes(linetype=IMD_QUINTILE, size=IMD_QUINTILE)) + 
+    geom_point(aes(shape=IMD_QUINTILE, colour=IMD_QUINTILE)) +
+    xlab("Year") +
+    ylab("GP full time equivalent per 100,000 need adjusted population") +
+    scale_y_continuous(labels = comma) +
+    scale_x_continuous(breaks=start_year:end_year, labels=paste(str_sub(start_year:end_year,3), str_sub((start_year+1):(end_year+1),3),sep="/")) +
+    scale_colour_manual(name="IMD Quintile Group", values=c("black","lightblue","lightblue","lightblue","darkgrey"), labels=imd_labels) +
+    scale_shape_manual(name="IMD Quintile Group", values=c(19,21,24,0,15), labels=imd_labels) +
+    scale_linetype_manual(name="IMD Quintile Group", values=c(1,2,2,2,1), labels=imd_labels) +
+    scale_size_manual(name="IMD Quintile Group", values=c(1,0.5,0.5,0.5,1), labels=imd_labels) +
+    facet_grid(VARIABLE~SEX,scales="free",labeller = labeller(VARIABLE = label_wrap_gen(40))) +
+    theme_bw() + 
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          plot.margin = unit(c(1, 1, 1, 1), "lines"),
+          text=element_text(family = "Roboto", colour = "#3e3f3a"),
+          legend.position = "bottom") +
+    labs(title = "Trends in GP supply by neighbourhood deprivation",
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
+  
+  ggsave(paste0("figures/gp_trends_sex_fte_pop_adj.png"), gp_plot_sex_fte_pop_adj, width=25, height=30, units="cm", dpi="print")
+  
+}
+
+graph_all_staff_trends = function(database_name="primary_care_data.sqlite3"){
+  db = dbConnect(SQLite(), dbname=database_name)
+  gps_quintile = tbl(db, "gp_workforce_imd_quintiles") %>% collect() 
+  dbDisconnect(db)
+  
+  graph_data = gps_quintile %>%
+    select(YEAR,IMD_QUINTILE,TOTAL_POP,NEED_ADJ_POP,
+           TOTAL_GPEXRRL_HC=TOTAL_GP_EXRRL_HC, TOTAL_GPEXRRL_FTE=TOTAL_GP_EXRRL_FTE,
+           TOTAL_NURSES_HC, TOTAL_NURSES_FTE,
+           TOTAL_DPC_HC, TOTAL_DPC_FTE,
+           TOTAL_ADMIN_HC, TOTAL_ADMIN_FTE
+           ) %>%
+    gather(VARIABLE,VALUE,TOTAL_GPEXRRL_HC:TOTAL_ADMIN_FTE) %>%
+    separate(VARIABLE,c("x","VARIABLE","TYPE")) %>%
+    select(-x) %>%
+    mutate(IMD_QUINTILE = factor(IMD_QUINTILE,1:5, c("Q1 (most deprived)","Q2","Q3","Q4","Q5 (least deprived)")),
+           TYPE = factor(TYPE, c("HC","FTE"),c("Headcount","Full time equivalent")),
+           VARIABLE = factor(VARIABLE,
+                             c("GPEXRRL","NURSES","DPC","ADMIN"),
+                             c("GPs excluding registrars, retainers and locums","Nurses","Direct patient care staff","Admin staff")))
+  
+  
+  imd_labels = c("Q1 (most deprived)","Q2","Q3","Q4","Q5 (least deprived)")
+  start_year=2015
+  end_year=2018
+  all_staff_plot_raw = ggplot(graph_data) + 
+    aes(x=YEAR, y=VALUE, group=IMD_QUINTILE, colour=IMD_QUINTILE) + 
+    geom_line(aes(linetype=IMD_QUINTILE, size=IMD_QUINTILE)) + 
+    geom_point(aes(shape=IMD_QUINTILE, colour=IMD_QUINTILE)) +
+    xlab("Year") +
+    ylab("") +
+    scale_y_continuous(labels = comma) +
+    scale_x_continuous(breaks=start_year:end_year, labels=paste(str_sub(start_year:end_year,3), str_sub((start_year+1):(end_year+1),3),sep="/")) +
+    scale_colour_manual(name="IMD Quintile Group", values=c("black","lightblue","lightblue","lightblue","darkgrey"), labels=imd_labels) +
+    scale_shape_manual(name="IMD Quintile Group", values=c(19,21,24,0,15), labels=imd_labels) +
+    scale_linetype_manual(name="IMD Quintile Group", values=c(1,2,2,2,1), labels=imd_labels) +
+    scale_size_manual(name="IMD Quintile Group", values=c(1,0.5,0.5,0.5,1), labels=imd_labels) +
+    facet_grid(VARIABLE~TYPE,scales="free",labeller = labeller(VARIABLE = label_wrap_gen(40))) +
+    theme_bw() + 
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          plot.margin = unit(c(1, 1, 1, 1), "lines"),
+          text=element_text(family = "Roboto", colour = "#3e3f3a"),
+          legend.position = "bottom") +
+    labs(title = "Trends in general practice workforce supply by neighbourhood deprivation",
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
+  
+  ggsave(paste0("figures/all_staff_trends_raw.png"), all_staff_plot_raw, width=25, height=35, units="cm", dpi="print")
+  
+  all_staff_plot_pop = ggplot(graph_data) + 
+    aes(x=YEAR, y=(100000*VALUE/TOTAL_POP), group=IMD_QUINTILE, colour=IMD_QUINTILE) + 
+    geom_line(aes(linetype=IMD_QUINTILE, size=IMD_QUINTILE)) + 
+    geom_point(aes(shape=IMD_QUINTILE, colour=IMD_QUINTILE)) +
+    xlab("Year") +
+    ylab("") +
+    scale_y_continuous(labels = comma) +
+    scale_x_continuous(breaks=start_year:end_year, labels=paste(str_sub(start_year:end_year,3), str_sub((start_year+1):(end_year+1),3),sep="/")) +
+    scale_colour_manual(name="IMD Quintile Group", values=c("black","lightblue","lightblue","lightblue","darkgrey"), labels=imd_labels) +
+    scale_shape_manual(name="IMD Quintile Group", values=c(19,21,24,0,15), labels=imd_labels) +
+    scale_linetype_manual(name="IMD Quintile Group", values=c(1,2,2,2,1), labels=imd_labels) +
+    scale_size_manual(name="IMD Quintile Group", values=c(1,0.5,0.5,0.5,1), labels=imd_labels) +
+    facet_grid(VARIABLE~TYPE,scales="free",labeller = labeller(VARIABLE = label_wrap_gen(40))) +
+    theme_bw() + 
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          plot.margin = unit(c(1, 1, 1, 1), "lines"),
+          text=element_text(family = "Roboto", colour = "#3e3f3a"),
+          legend.position = "bottom") +
+    labs(title = "Trends in general practice workforce supply per 100,000 population by neighbourhood deprivation",
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
+  
+  ggsave(paste0("figures/all_staff_trends_pop.png"), all_staff_plot_pop, width=25, height=35, units="cm", dpi="print")
+  
+  all_staff_plot_pop_adj = ggplot(graph_data) + 
+    aes(x=YEAR, y=(100000*VALUE/NEED_ADJ_POP), group=IMD_QUINTILE, colour=IMD_QUINTILE) + 
+    geom_line(aes(linetype=IMD_QUINTILE, size=IMD_QUINTILE)) + 
+    geom_point(aes(shape=IMD_QUINTILE, colour=IMD_QUINTILE)) +
+    xlab("Year") +
+    ylab("") +
+    scale_y_continuous(labels = comma) +
+    scale_x_continuous(breaks=start_year:end_year, labels=paste(str_sub(start_year:end_year,3), str_sub((start_year+1):(end_year+1),3),sep="/")) +
+    scale_colour_manual(name="IMD Quintile Group", values=c("black","lightblue","lightblue","lightblue","darkgrey"), labels=imd_labels) +
+    scale_shape_manual(name="IMD Quintile Group", values=c(19,21,24,0,15), labels=imd_labels) +
+    scale_linetype_manual(name="IMD Quintile Group", values=c(1,2,2,2,1), labels=imd_labels) +
+    scale_size_manual(name="IMD Quintile Group", values=c(1,0.5,0.5,0.5,1), labels=imd_labels) +
+    facet_grid(VARIABLE~TYPE,scales="free",labeller = labeller(VARIABLE = label_wrap_gen(40))) +
+    theme_bw() + 
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          plot.margin = unit(c(1, 1, 1, 1), "lines"),
+          text=element_text(family = "Roboto", colour = "#3e3f3a"),
+          legend.position = "bottom") +
+    labs(title = "Trends in general practice workforce supply per 100,000 need adjusted population by neighbourhood deprivation",
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
+  
+  ggsave(paste0("figures/all_staff_trends_pop_adj.png"), all_staff_plot_pop_adj, width=25, height=35, units="cm", dpi="print")
+}
+
+opening_and_closing_practices = function(database_name="primary_care_data.sqlite3"){
+  db = dbConnect(SQLite(), dbname=database_name)
+  gp_practices = tbl(db, "gp_workforce_newdata_imputed") %>% select(YEAR,PRAC_CODE,PRAC_NAME,TOTAL_GP_HC) %>% collect() 
+  gp_imd = tbl(db, "gp_imd_2015") %>% collect() %>% add_quintiles() %>% select(PRAC_CODE,IMD_QUINTILE)
+  dbDisconnect(db)
+  
+  gp_practices_2015 = gp_practices %>% filter(YEAR==2015)
+  gp_practices_2016 = gp_practices %>% filter(YEAR==2016)
+  gp_practices_2017 = gp_practices %>% filter(YEAR==2017)
+  gp_practices_2018 = gp_practices %>% filter(YEAR==2018)
+  
+  closed_2016 = setdiff(gp_practices_2015$PRAC_CODE,gp_practices_2016$PRAC_CODE)
+  opened_2016 = setdiff(gp_practices_2016$PRAC_CODE,gp_practices_2015$PRAC_CODE)
+  closed_2017 = setdiff(gp_practices_2016$PRAC_CODE,gp_practices_2017$PRAC_CODE)
+  opened_2017 = setdiff(gp_practices_2017$PRAC_CODE,gp_practices_2016$PRAC_CODE)
+  closed_2018 = setdiff(gp_practices_2017$PRAC_CODE,gp_practices_2018$PRAC_CODE)
+  opened_2018 = setdiff(gp_practices_2018$PRAC_CODE,gp_practices_2017$PRAC_CODE)
+  
+  open_close = bind_rows(
+  gp_practices_2015 %>% filter(PRAC_CODE %in% closed_2016) %>% mutate(OPEN_CLOSE="closed", YEAR=2016),
+  gp_practices_2016 %>% filter(PRAC_CODE %in% opened_2016) %>% mutate(OPEN_CLOSE="opened"),
+  gp_practices_2016 %>% filter(PRAC_CODE %in% closed_2017) %>% mutate(OPEN_CLOSE="closed", YEAR=2017),
+  gp_practices_2017 %>% filter(PRAC_CODE %in% opened_2017) %>% mutate(OPEN_CLOSE="opened"),
+  gp_practices_2017 %>% filter(PRAC_CODE %in% closed_2018) %>% mutate(OPEN_CLOSE="closed", YEAR=2018),
+  gp_practices_2018 %>% filter(PRAC_CODE %in% opened_2018) %>% mutate(OPEN_CLOSE="opened")) %>% left_join(gp_imd)
+  
+  open_closed_quintiles = open_close %>% 
+    group_by(YEAR,OPEN_CLOSE,IMD_QUINTILE) %>% 
+    summarise(NUM_PRACTICES=n(),GP_HC=sum(TOTAL_GP_HC)) %>%
+    arrange(YEAR,OPEN_CLOSE,IMD_QUINTILE)
+
+  return(opening_and_closing_practices)
+}
+

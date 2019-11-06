@@ -37,4 +37,5 @@ rsconnect/
 
 .DS_Store
 raw_data/
+figures/
 *.sqlite3
