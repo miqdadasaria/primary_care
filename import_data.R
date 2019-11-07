@@ -1416,6 +1416,106 @@ graph_all_staff_trends = function(database_name="primary_care_data.sqlite3"){
   ggsave(paste0("figures/all_staff_trends_pop_adj.png"), all_staff_plot_pop_adj, width=25, height=35, units="cm", dpi="print")
 }
 
+graph_gp_locum_trends = function(database_name="primary_care_data.sqlite3"){
+  db = dbConnect(SQLite(), dbname=database_name)
+  gps_quintile = tbl(db, "gp_workforce_imd_quintiles") %>% collect() 
+  dbDisconnect(db)
+  
+  graph_data = gps_quintile %>%
+    select(YEAR,IMD_QUINTILE,TOTAL_POP,NEED_ADJ_POP,
+           GPLOCUMABS_HC=TOTAL_GP_LOCUM_ABS_HC,
+           GPLOCUMVAC_HC = TOTAL_GP_LOCUM_VAC_HC,
+           GPLOCUMOTH_HC = TOTAL_GP_LOCUM_OTH_HC,
+           GPLOCUMABS_FTE = TOTAL_GP_LOCUM_ABS_FTE,
+           GPLOCUMVAC_FTE = TOTAL_GP_LOCUM_VAC_FTE,
+           GPLOCUMOTH_FTE = TOTAL_GP_LOCUM_OTH_FTE) %>% 
+    gather(VARIABLE,VALUE,GPLOCUMABS_HC:GPLOCUMOTH_FTE) %>%
+    separate(VARIABLE,c("VARIABLE","TYPE")) %>%
+    mutate(IMD_QUINTILE = factor(IMD_QUINTILE,1:5, c("Q1 (most deprived)","Q2","Q3","Q4","Q5 (least deprived)")),
+           TYPE = factor(TYPE, c("HC","FTE"),c("Headcount","Full time equivalent")),
+           VARIABLE = factor(VARIABLE,
+                             c("GPLOCUMABS","GPLOCUMVAC","GPLOCUMOTH"),
+                             c( "Locums covering vacancies","Locums covering sickness/maternity/paternity","Locums other")))
+  
+  imd_labels = c("Q1 (most deprived)","Q2","Q3","Q4","Q5 (least deprived)")
+  start_year=2015
+  end_year=2018
+  gp_plot_raw = ggplot(graph_data) + 
+    aes(x=YEAR, y=VALUE, group=IMD_QUINTILE, colour=IMD_QUINTILE) + 
+    geom_line(aes(linetype=IMD_QUINTILE, size=IMD_QUINTILE)) + 
+    geom_point(aes(shape=IMD_QUINTILE, colour=IMD_QUINTILE)) +
+    xlab("Year") +
+    ylab("") +
+    scale_y_continuous(labels = comma) +
+    scale_x_continuous(breaks=start_year:end_year, labels=paste(str_sub(start_year:end_year,3), str_sub((start_year+1):(end_year+1),3),sep="/")) +
+    scale_colour_manual(name="IMD Quintile Group", values=c("black","lightblue","lightblue","lightblue","darkgrey"), labels=imd_labels) +
+    scale_shape_manual(name="IMD Quintile Group", values=c(19,21,24,0,15), labels=imd_labels) +
+    scale_linetype_manual(name="IMD Quintile Group", values=c(1,2,2,2,1), labels=imd_labels) +
+    scale_size_manual(name="IMD Quintile Group", values=c(1,0.5,0.5,0.5,1), labels=imd_labels) +
+    facet_grid(VARIABLE~TYPE,scales="free",labeller = labeller(VARIABLE = label_wrap_gen(40))) +
+    theme_bw() + 
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          plot.margin = unit(c(1, 1, 1, 1), "lines"),
+          text=element_text(family = "Roboto", colour = "#3e3f3a"),
+          legend.position = "bottom") +
+    labs(title = "Trends in GP locum supply by neighbourhood deprivation",
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
+  
+  ggsave(paste0("figures/gp_locum_trends_raw.png"), gp_plot_raw, width=25, height=35, units="cm", dpi="print")
+  
+  gp_plot_pop = ggplot(graph_data) + 
+    aes(x=YEAR, y=(100000*VALUE/TOTAL_POP), group=IMD_QUINTILE, colour=IMD_QUINTILE) + 
+    geom_line(aes(linetype=IMD_QUINTILE, size=IMD_QUINTILE)) + 
+    geom_point(aes(shape=IMD_QUINTILE, colour=IMD_QUINTILE)) +
+    xlab("Year") +
+    ylab("") +
+    scale_y_continuous(labels = comma) +
+    scale_x_continuous(breaks=start_year:end_year, labels=paste(str_sub(start_year:end_year,3), str_sub((start_year+1):(end_year+1),3),sep="/")) +
+    scale_colour_manual(name="IMD Quintile Group", values=c("black","lightblue","lightblue","lightblue","darkgrey"), labels=imd_labels) +
+    scale_shape_manual(name="IMD Quintile Group", values=c(19,21,24,0,15), labels=imd_labels) +
+    scale_linetype_manual(name="IMD Quintile Group", values=c(1,2,2,2,1), labels=imd_labels) +
+    scale_size_manual(name="IMD Quintile Group", values=c(1,0.5,0.5,0.5,1), labels=imd_labels) +
+    facet_grid(VARIABLE~TYPE,scales="free",labeller = labeller(VARIABLE = label_wrap_gen(40))) +
+    theme_bw() + 
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          plot.margin = unit(c(1, 1, 1, 1), "lines"),
+          text=element_text(family = "Roboto", colour = "#3e3f3a"),
+          legend.position = "bottom") +
+    labs(title = "Trends in GP locum supply per 100,000 population by neighbourhood deprivation",
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
+  
+  ggsave(paste0("figures/gp_locum_trends_pop.png"), gp_plot_pop, width=25, height=35, units="cm", dpi="print")
+  
+  gp_plot_pop_adj = ggplot(graph_data) + 
+    aes(x=YEAR, y=(100000*VALUE/NEED_ADJ_POP), group=IMD_QUINTILE, colour=IMD_QUINTILE) + 
+    geom_line(aes(linetype=IMD_QUINTILE, size=IMD_QUINTILE)) + 
+    geom_point(aes(shape=IMD_QUINTILE, colour=IMD_QUINTILE)) +
+    xlab("Year") +
+    ylab("") +
+    scale_y_continuous(labels = comma) +
+    scale_x_continuous(breaks=start_year:end_year, labels=paste(str_sub(start_year:end_year,3), str_sub((start_year+1):(end_year+1),3),sep="/")) +
+    scale_colour_manual(name="IMD Quintile Group", values=c("black","lightblue","lightblue","lightblue","darkgrey"), labels=imd_labels) +
+    scale_shape_manual(name="IMD Quintile Group", values=c(19,21,24,0,15), labels=imd_labels) +
+    scale_linetype_manual(name="IMD Quintile Group", values=c(1,2,2,2,1), labels=imd_labels) +
+    scale_size_manual(name="IMD Quintile Group", values=c(1,0.5,0.5,0.5,1), labels=imd_labels) +
+    facet_grid(VARIABLE~TYPE,scales="free",labeller = labeller(VARIABLE = label_wrap_gen(40))) +
+    theme_bw() + 
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          plot.margin = unit(c(1, 1, 1, 1), "lines"),
+          text=element_text(family = "Roboto", colour = "#3e3f3a"),
+          legend.position = "bottom") +
+    labs(title = "Trends in GP locum supply per 100,000 need adjusted population by neighbourhood deprivation",
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
+  
+  ggsave(paste0("figures/gp_locum_trends_pop_adj.png"), gp_plot_pop_adj, width=25, height=35, units="cm", dpi="print")
+}
+
 opening_and_closing_practices = function(database_name="primary_care_data.sqlite3"){
   db = dbConnect(SQLite(), dbname=database_name)
   gp_practices = tbl(db, "gp_workforce_newdata_imputed") %>% select(YEAR,PRAC_CODE,PRAC_NAME,TOTAL_GP_HC) %>% collect() 
@@ -1447,6 +1547,6 @@ opening_and_closing_practices = function(database_name="primary_care_data.sqlite
     summarise(NUM_PRACTICES=n(),GP_HC=sum(TOTAL_GP_HC)) %>%
     arrange(YEAR,OPEN_CLOSE,IMD_QUINTILE)
 
-  return(opening_and_closing_practices)
+  return(open_closed_quintiles)
 }
 
