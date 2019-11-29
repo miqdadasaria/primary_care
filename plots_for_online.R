@@ -5,7 +5,7 @@ library(RSQLite)
 library(scales)
 
 
-get_ccg_list = function(database_name="primary_care_data.sqlite3"){
+get_ccg_list = function(database_name="primary_care_data_online.sqlite3"){
   db = dbConnect(SQLite(), dbname=database_name)
   ccgs = tbl(db,"ccg_ons_code_mapping") %>% select(CCG19CD,CCG19NM) %>% distinct(CCG19CD,CCG19NM) %>% collect()
   ccg_list = as.list(ccgs$CCG19CD)
@@ -13,7 +13,7 @@ get_ccg_list = function(database_name="primary_care_data.sqlite3"){
   return(ccg_list)
 }
   
-make_data_table = function(x_var, y_var, adj_method, year, geography, trim_outliers, database_name="primary_care_data.sqlite3"){
+make_data_table = function(x_var, y_var, adj_method, year, geography, trim_outliers, database_name="primary_care_data_online.sqlite3"){
   db = dbConnect(SQLite(), dbname=database_name)
   
   if(geography == "lsoa"){
@@ -103,7 +103,7 @@ workforce_scatter_plot = function(x_var, y_var, adj_method, year, geography, tri
 
 }
 
-imd_plot = function(y_var, adj_method, database_name="primary_care_data.sqlite3"){
+imd_plot = function(y_var, adj_method, database_name="primary_care_data_online.sqlite3"){
   db = dbConnect(SQLite(), dbname=database_name)
   gps_quintile = tbl(db, "gp_workforce_imd_quintiles") %>% collect() 
   dbDisconnect(db)

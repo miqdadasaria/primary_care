@@ -37,7 +37,7 @@ make_popup_messages = function(map, selected_ccg){
   return(popup_messages)  
 }
 
-make_gp_markers = function(year, database_name="primary_care_data.sqlite3"){
+make_gp_markers = function(year, database_name="primary_care_data_online.sqlite3"){
   db = dbConnect(SQLite(), dbname=database_name)
   geo = tbl(db,"ccg_practice_mapping") %>% select(PRAC_CODE=PRACTICE_CODE,LONG,LAT) %>% collect()
   data = tbl(db,"gp_workforce_newdata_imputed") %>% filter(YEAR==year) %>% collect()
@@ -63,7 +63,7 @@ make_gp_markers = function(year, database_name="primary_care_data.sqlite3"){
   return(gp_practices)
 }
 
-make_choropleth_map = function(year, selected_ccg, database_name="primary_care_data.sqlite3"){
+make_choropleth_map = function(year, selected_ccg, database_name="primary_care_data_online.sqlite3"){
   ccg_map = read_geojson(year, selected_ccg)
     
   popup_message = make_popup_messages(ccg_map, selected_ccg)
