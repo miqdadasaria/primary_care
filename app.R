@@ -34,6 +34,12 @@ server = shinyServer(function(input, output) {
         )
     })
     
+    output$age_sex_plot = renderPlot({
+        withProgress(message = 'Generating imd plot...',
+                     gp_age_sex_plot(input$year, input$adj_method)
+        )
+    })
+    
     output$raw_data = renderDataTable({
         withProgress(message = 'Loading raw data table',{
             table = make_data_table(input$x_var, input$y_var, input$adj_method, input$year, input$geography, input$trim_outliers)
@@ -107,7 +113,8 @@ ui = shinyUI(fluidPage(theme = "sandstone.css",
                            tabsetPanel(id="tabset",
                                        tabPanel("Map", leafletOutput("primary_care_map")),
                                        tabPanel("Scatter Plots", plotOutput("scatter")),
-                                       tabPanel("IMD Quintile Plots", plotOutput("imd_plot")),
+                                       tabPanel("IMD Quintile Trends", plotOutput("imd_plot")),
+                                       tabPanel("GP Age Sex IMD Plots", plotOutput("age_sex_plot")),
                                        tabPanel("Raw Data", dataTableOutput("raw_data"))
                            )
                        )

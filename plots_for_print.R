@@ -9,7 +9,7 @@ library("ggpubr")
 
 graph_population_trends = function(database_name="primary_care_data.sqlite3"){
   db = dbConnect(SQLite(), dbname=database_name)
-  population = tbl(db, "gp_workforce_imd_quintiles") %>% select(YEAR,IMD_QUINTILE,TOTAL_POP,NEED_ADJ_POP) %>% collect() 
+  population = tbl(db, "gp_workforce_imd_quintiles_imputed") %>% select(YEAR,IMD_QUINTILE,TOTAL_POP,NEED_ADJ_POP) %>% collect() 
   dbDisconnect(db)
   
   graph_data = population %>% gather(POP_TYPE,POP,contains("POP")) %>%
@@ -39,7 +39,7 @@ graph_population_trends = function(database_name="primary_care_data.sqlite3"){
           text=element_text(family = "Roboto", colour = "#3e3f3a"),
           legend.position = "bottom") +
     labs(title = "Trends in population by neighbourhood deprivation",
-         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2019 quintiles"),
          caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
   
   ggsave(paste0("figures/pop_trends.png"), pop_plot, width=25, height=10, units="cm", dpi="print")
@@ -49,10 +49,10 @@ graph_population_trends = function(database_name="primary_care_data.sqlite3"){
 graph_gp_trends = function(database_name="primary_care_data.sqlite3", imputed=TRUE){
   db = dbConnect(SQLite(), dbname=database_name)
   if(imputed){
-    gps_quintile = tbl(db, "gp_workforce_imd_quintiles") %>% collect() 
+    gps_quintile = tbl(db, "gp_workforce_imd_quintiles_imputed") %>% collect() 
     suffix = "_imputed"
   } else {
-    gps_quintile = tbl(db, "gp_workforce_imd_quintiles_not_imputed") %>% collect() 
+    gps_quintile = tbl(db, "gp_workforce_imd_quintiles") %>% collect() 
     suffix = "_not_imputed"
   }
   
@@ -104,7 +104,7 @@ graph_gp_trends = function(database_name="primary_care_data.sqlite3", imputed=TR
           text=element_text(family = "Roboto", colour = "#3e3f3a"),
           legend.position = "bottom") +
     labs(title = "Trends in GP supply by neighbourhood deprivation",
-         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2019 quintiles"),
          caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
   
   ggsave(paste0("figures/gp_trends_raw",suffix,".png"), gp_plot_raw, width=25, height=35, units="cm", dpi="print")
@@ -129,7 +129,7 @@ graph_gp_trends = function(database_name="primary_care_data.sqlite3", imputed=TR
           text=element_text(family = "Roboto", colour = "#3e3f3a"),
           legend.position = "bottom") +
     labs(title = "Trends in GP supply per 100,000 population by neighbourhood deprivation",
-         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2019 quintiles"),
          caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
   
   ggsave(paste0("figures/gp_trends_pop",suffix,".png"), gp_plot_pop, width=25, height=35, units="cm", dpi="print")
@@ -154,7 +154,7 @@ graph_gp_trends = function(database_name="primary_care_data.sqlite3", imputed=TR
           text=element_text(family = "Roboto", colour = "#3e3f3a"),
           legend.position = "bottom") +
     labs(title = "Trends in GP supply per 100,000 need adjusted population by neighbourhood deprivation",
-         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2019 quintiles"),
          caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
   
   ggsave(paste0("figures/gp_trends_pop_adj",suffix,".png"), gp_plot_pop_adj, width=25, height=35, units="cm", dpi="print")
@@ -163,10 +163,10 @@ graph_gp_trends = function(database_name="primary_care_data.sqlite3", imputed=TR
 graph_gp_age_sex = function(database_name="primary_care_data.sqlite3", year=2018, imputed=TRUE){
   db = dbConnect(SQLite(), dbname=database_name)
   if(imputed){
-    gps_quintile = tbl(db, "gp_workforce_imd_quintiles") %>% collect() %>% filter(YEAR==year) %>% select(IMD_QUINTILE,NEED_ADJ_POP,TOTAL_POP,contains("_HC_"))
+    gps_quintile = tbl(db, "gp_workforce_imd_quintiles_imputed") %>% collect() %>% filter(YEAR==year) %>% select(IMD_QUINTILE,NEED_ADJ_POP,TOTAL_POP,contains("_HC_"))
     suffix = "_imputed"
   } else {
-    gps_quintile = tbl(db, "gp_workforce_imd_quintiles_not_imputed") %>% collect() %>% filter(YEAR==year) %>% select(IMD_QUINTILE,NEED_ADJ_POP,TOTAL_POP,contains("_HC_"))
+    gps_quintile = tbl(db, "gp_workforce_imd_quintiles") %>% collect() %>% filter(YEAR==year) %>% select(IMD_QUINTILE,NEED_ADJ_POP,TOTAL_POP,contains("_HC_"))
     suffix = "_not_imputed"
   }
   dbDisconnect(db)
@@ -191,7 +191,7 @@ graph_gp_age_sex = function(database_name="primary_care_data.sqlite3", year=2018
           plot.margin = unit(c(1, 1, 1, 1), "lines"),
           axis.text.x = element_text(angle = 90, hjust = 1)) +
     labs(title = "Age/Sex distribution of GP supply by neighbourhood deprivation quintile",
-         subtitle = paste0("Data for England in years ",year," based on IMD 2015 quintiles"),
+         subtitle = paste0("Data for England in years ",year," based on IMD 2019 quintiles"),
          caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
   
   
@@ -208,7 +208,7 @@ graph_gp_age_sex = function(database_name="primary_care_data.sqlite3", year=2018
           plot.margin = unit(c(1, 1, 1, 1), "lines"),
           axis.text.x = element_text(angle = 90, hjust = 1)) +
     labs(title = "Age/Sex distribution of GP supply per 100,000 population by neighbourhood deprivation quintile",
-         subtitle = paste0("Data for England in years ",year," based on IMD 2015 quintiles"),
+         subtitle = paste0("Data for England in years ",year," based on IMD 2019 quintiles"),
          caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
   
   
@@ -225,7 +225,7 @@ graph_gp_age_sex = function(database_name="primary_care_data.sqlite3", year=2018
           plot.margin = unit(c(1, 1, 1, 1), "lines"),
           axis.text.x = element_text(angle = 90, hjust = 1)) +
     labs(title = "Age/Sex distribution of GP supply per 100,000 need adjusted population by neighbourhood deprivation quintile",
-         subtitle = paste0("Data for England in years ",year," based on IMD 2015 quintiles"),
+         subtitle = paste0("Data for England in years ",year," based on IMD 2019 quintiles"),
          caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
   
   
@@ -235,10 +235,10 @@ graph_gp_age_sex = function(database_name="primary_care_data.sqlite3", year=2018
 graph_gp_trends_by_sex = function(database_name="primary_care_data.sqlite3", imputed=TRUE){
   db = dbConnect(SQLite(), dbname=database_name)
   if(imputed){
-    gps_quintile = tbl(db, "gp_workforce_imd_quintiles") %>% collect() 
+    gps_quintile = tbl(db, "gp_workforce_imd_quintiles_imputed") %>% collect() 
     suffix = "_imputed"
   } else {
-    gps_quintile = tbl(db, "gp_workforce_imd_quintiles_not_imputed") %>% collect() 
+    gps_quintile = tbl(db, "gp_workforce_imd_quintiles") %>% collect() 
     suffix = "_not_imputed"
   }
   
@@ -283,7 +283,7 @@ graph_gp_trends_by_sex = function(database_name="primary_care_data.sqlite3", imp
           text=element_text(family = "Roboto", colour = "#3e3f3a"),
           legend.position = "bottom") +
     labs(title = "Trends in GP supply by neighbourhood deprivation",
-         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2019 quintiles"),
          caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
   
   ggsave(paste0("figures/gp_trends_sex_hc_raw",suffix,".png"), gp_plot_sex_hc_raw, width=25, height=30, units="cm", dpi="print")
@@ -309,7 +309,7 @@ graph_gp_trends_by_sex = function(database_name="primary_care_data.sqlite3", imp
           text=element_text(family = "Roboto", colour = "#3e3f3a"),
           legend.position = "bottom") +
     labs(title = "Trends in GP supply by neighbourhood deprivation",
-         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2019 quintiles"),
          caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
   
   ggsave(paste0("figures/gp_trends_sex_fte_raw",suffix,".png"), gp_plot_sex_fte_raw, width=25, height=30, units="cm", dpi="print")
@@ -335,7 +335,7 @@ graph_gp_trends_by_sex = function(database_name="primary_care_data.sqlite3", imp
           text=element_text(family = "Roboto", colour = "#3e3f3a"),
           legend.position = "bottom") +
     labs(title = "Trends in GP supply by neighbourhood deprivation",
-         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2019 quintiles"),
          caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
   
   ggsave(paste0("figures/gp_trends_sex_hc_pop",suffix,".png"), gp_plot_sex_hc_pop, width=25, height=30, units="cm", dpi="print")
@@ -361,7 +361,7 @@ graph_gp_trends_by_sex = function(database_name="primary_care_data.sqlite3", imp
           text=element_text(family = "Roboto", colour = "#3e3f3a"),
           legend.position = "bottom") +
     labs(title = "Trends in GP supply by neighbourhood deprivation",
-         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2019 quintiles"),
          caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
   
   ggsave(paste0("figures/gp_trends_sex_fte_pop",suffix,".png"), gp_plot_sex_fte_pop, width=25, height=30, units="cm", dpi="print")
@@ -387,7 +387,7 @@ graph_gp_trends_by_sex = function(database_name="primary_care_data.sqlite3", imp
           text=element_text(family = "Roboto", colour = "#3e3f3a"),
           legend.position = "bottom") +
     labs(title = "Trends in GP supply by neighbourhood deprivation",
-         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2019 quintiles"),
          caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
   
   ggsave(paste0("figures/gp_trends_sex_hc_pop_adj",suffix,".png"), gp_plot_sex_hc_pop_adj, width=25, height=30, units="cm", dpi="print")
@@ -413,7 +413,7 @@ graph_gp_trends_by_sex = function(database_name="primary_care_data.sqlite3", imp
           text=element_text(family = "Roboto", colour = "#3e3f3a"),
           legend.position = "bottom") +
     labs(title = "Trends in GP supply by neighbourhood deprivation",
-         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2019 quintiles"),
          caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
   
   ggsave(paste0("figures/gp_trends_sex_fte_pop_adj",suffix,".png"), gp_plot_sex_fte_pop_adj, width=25, height=30, units="cm", dpi="print")
@@ -423,10 +423,10 @@ graph_gp_trends_by_sex = function(database_name="primary_care_data.sqlite3", imp
 graph_all_staff_trends = function(database_name="primary_care_data.sqlite3", imputed=TRUE){
   db = dbConnect(SQLite(), dbname=database_name)
   if(imputed){
-    gps_quintile = tbl(db, "gp_workforce_imd_quintiles") %>% collect() 
+    gps_quintile = tbl(db, "gp_workforce_imd_quintiles_imputed") %>% collect() 
     suffix = "_imputed"
   } else {
-    gps_quintile = tbl(db, "gp_workforce_imd_quintiles_not_imputed") %>% collect() 
+    gps_quintile = tbl(db, "gp_workforce_imd_quintiles") %>% collect() 
     suffix = "_not_imputed"
   }
   dbDisconnect(db)
@@ -471,7 +471,7 @@ graph_all_staff_trends = function(database_name="primary_care_data.sqlite3", imp
           text=element_text(family = "Roboto", colour = "#3e3f3a"),
           legend.position = "bottom") +
     labs(title = "Trends in general practice workforce supply by neighbourhood deprivation",
-         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2019 quintiles"),
          caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
   
   ggsave(paste0("figures/all_staff_trends_raw",suffix,".png"), all_staff_plot_raw, width=25, height=35, units="cm", dpi="print")
@@ -496,7 +496,7 @@ graph_all_staff_trends = function(database_name="primary_care_data.sqlite3", imp
           text=element_text(family = "Roboto", colour = "#3e3f3a"),
           legend.position = "bottom") +
     labs(title = "Trends in general practice workforce supply per 100,000 population by neighbourhood deprivation",
-         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2019 quintiles"),
          caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
   
   ggsave(paste0("figures/all_staff_trends_pop",suffix,".png"), all_staff_plot_pop, width=25, height=35, units="cm", dpi="print")
@@ -521,7 +521,7 @@ graph_all_staff_trends = function(database_name="primary_care_data.sqlite3", imp
           text=element_text(family = "Roboto", colour = "#3e3f3a"),
           legend.position = "bottom") +
     labs(title = "Trends in general practice workforce supply per 100,000 need adjusted population by neighbourhood deprivation",
-         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2019 quintiles"),
          caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
   
   ggsave(paste0("figures/all_staff_trends_pop_adj",suffix,".png"), all_staff_plot_pop_adj, width=25, height=35, units="cm", dpi="print")
@@ -530,10 +530,10 @@ graph_all_staff_trends = function(database_name="primary_care_data.sqlite3", imp
 graph_gp_locum_trends = function(database_name="primary_care_data.sqlite3", imputed=TRUE){
   db = dbConnect(SQLite(), dbname=database_name)
   if(imputed){
-    gps_quintile = tbl(db, "gp_workforce_imd_quintiles") %>% collect() 
+    gps_quintile = tbl(db, "gp_workforce_imd_quintiles_imputed") %>% collect() 
     suffix = "_imputed"
   } else {
-    gps_quintile = tbl(db, "gp_workforce_imd_quintiles_not_imputed") %>% collect() 
+    gps_quintile = tbl(db, "gp_workforce_imd_quintiles") %>% collect() 
     suffix = "_not_imputed"
   }
   dbDisconnect(db)
@@ -577,7 +577,7 @@ graph_gp_locum_trends = function(database_name="primary_care_data.sqlite3", impu
           text=element_text(family = "Roboto", colour = "#3e3f3a"),
           legend.position = "bottom") +
     labs(title = "Trends in GP locum supply by neighbourhood deprivation",
-         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2019 quintiles"),
          caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
   
   ggsave(paste0("figures/gp_locum_trends_raw",suffix,".png"), gp_plot_raw, width=25, height=35, units="cm", dpi="print")
@@ -602,7 +602,7 @@ graph_gp_locum_trends = function(database_name="primary_care_data.sqlite3", impu
           text=element_text(family = "Roboto", colour = "#3e3f3a"),
           legend.position = "bottom") +
     labs(title = "Trends in GP locum supply per 100,000 population by neighbourhood deprivation",
-         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2019 quintiles"),
          caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
   
   ggsave(paste0("figures/gp_locum_trends_pop",suffix,".png"), gp_plot_pop, width=25, height=35, units="cm", dpi="print")
@@ -627,7 +627,7 @@ graph_gp_locum_trends = function(database_name="primary_care_data.sqlite3", impu
           text=element_text(family = "Roboto", colour = "#3e3f3a"),
           legend.position = "bottom") +
     labs(title = "Trends in GP locum supply per 100,000 need adjusted population by neighbourhood deprivation",
-         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2015 quintiles"),
+         subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2019 quintiles"),
          caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
   
   ggsave(paste0("figures/gp_locum_trends_pop_adj",suffix,".png"), gp_plot_pop_adj, width=25, height=35, units="cm", dpi="print")
@@ -636,7 +636,7 @@ graph_gp_locum_trends = function(database_name="primary_care_data.sqlite3", impu
 opening_and_closing_practices = function(database_name="primary_care_data.sqlite3"){
   db = dbConnect(SQLite(), dbname=database_name)
   gp_practices = tbl(db, "gp_workforce_newdata_imputed") %>% select(YEAR,PRAC_CODE,PRAC_NAME,TOTAL_GP_HC) %>% collect() 
-  gp_imd = tbl(db, "gp_imd_2015") %>% collect() %>% add_quintiles() %>% select(PRAC_CODE,IMD_QUINTILE)
+  gp_imd = tbl(db, "gp_imd_2019") %>% select(PRAC_CODE,IMD_QUINTILE) %>% collect()
   dbDisconnect(db)
   
   gp_practices_2015 = gp_practices %>% filter(YEAR==2015)

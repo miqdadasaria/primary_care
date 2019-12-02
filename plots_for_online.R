@@ -17,11 +17,11 @@ make_data_table = function(x_var, y_var, adj_method, year, geography, trim_outli
   db = dbConnect(SQLite(), dbname=database_name)
   
   if(geography == "lsoa"){
-    graph_data = tbl(db, "gp_workforce_newdata_imputed_lsoa") %>% filter(YEAR==year) %>% collect()
+    graph_data = tbl(db, "gp_workforce_newdata_lsoa_imputed") %>% filter(YEAR==year) %>% collect()
     names = tbl(db, "ccg_lsoa_lad_mapping") %>% select(LSOA11CD,LSOA11NM) %>% collect()
     graph_data = graph_data %>% inner_join(names) %>% rename(ONS_CODE=LSOA11CD, NAME=LSOA11NM)
   } else if(geography == "ccg"){
-    data = tbl(db,"ccg_workforce") %>% filter(YEAR==year) %>% collect()
+    data = tbl(db,"ccg_workforce_imputed") %>% filter(YEAR==year) %>% collect()
     pop = tbl(db, "ccg_pop") %>% filter(YEAR==year) %>% collect()
     imd = tbl(db, "ccg_imd_2019") %>% select(CCG19CD,IMD_SCORE=average_score,IMD_RANK=rank_average_score) %>% collect()
     names = tbl(db,"ccg_ons_code_mapping") %>% select(CCG19CD,CCG19NM) %>% distinct(CCG19CD,CCG19NM) %>% collect()
@@ -105,7 +105,7 @@ workforce_scatter_plot = function(x_var, y_var, adj_method, year, geography, tri
 
 imd_plot = function(y_var, adj_method, database_name="primary_care_data_online.sqlite3"){
   db = dbConnect(SQLite(), dbname=database_name)
-  gps_quintile = tbl(db, "gp_workforce_imd_quintiles") %>% collect() 
+  gps_quintile = tbl(db, "gp_workforce_imd_quintiles_imputed") %>% collect() 
   dbDisconnect(db)
   
   graph_data = gps_quintile %>%
@@ -154,3 +154,51 @@ imd_plot = function(y_var, adj_method, database_name="primary_care_data_online.s
   
   return(gp_plot)
 }
+
+gp_age_sex_plot = function(year, adj_method, database_name="primary_care_data_online.sqlite3"){
+  db = dbConnect(SQLite(), dbname=database_name)
+  gps_quintile = tbl(db, "gp_workforce_imd_quintiles_imputed") %>% collect() %>% filter(YEAR==year) %>% select(IMD_QUINTILE,NEED_ADJ_POP,TOTAL_POP,contains("_HC_"))
+  dbDisconnect(db)
+  
+  graph_data = gps_quintile %>% gather(VARNAME,VALUE,MALE_GP_EXRRL_HC_UNDER30:FEMALE_GP_EXRRL_HC_UNKNOWN_AGE) %>%
+    separate(VARNAME,c("SEX","A","B","C","AGE")) %>%
+    select(IMD_QUINTILE, NEED_ADJ_POP,TOTAL_POP,SEX,AGE,GP_EXRRL_HC=VALUE) %>%
+    mutate(IMD_QUINTILE = factor(IMD_QUINTILE,1:5, c("Q1 (most deprived)","Q2","Q3","Q4","Q5 (least deprived)")),
+           AGE = factor(AGE,
+                        c("UNDER30","30TO34","35TO39","40TO44","45TO49","50TO54","55TO59","60TO64","65TO69","70PLUS","UNKNOWN"),
+                        c("<30","30-34","35-39","40-44","45-49","50-54","55-59","60-64","65-69","70+","Unknown")),
+           SEX = factor(SEX,c("FEMALE","MALE"),c("Female","Male")))
+  
+  
+  y_lab = "GPs excluding registrars, retainers and locums (headcount)"
+  
+  if(adj_method=="pop"){
+    graph_data = graph_data %>%
+      mutate(y = 100000*GP_EXRRL_HC/TOTAL_POP)
+    y_lab = paste0(y_lab," per 100,000 population")
+  } else if(adj_method=="adj_pop"){
+    graph_data = graph_data %>%
+      mutate(y = 100000*GP_EXRRL_HC/NEED_ADJ_POP) 
+    y_lab = paste0(y_lab," per 100,000 need adjusted population")
+  } else {
+    graph_data = graph_data %>%
+      mutate(y = GP_EXRRL_HC)
+  }
+  y_lab = lapply(strwrap(as.character(str_to_lower(y_lab)), width=40, simplify=FALSE), paste, collapse="\n")
+  
+  gp_plot = ggplot(graph_data, aes(x=AGE, y=y)) +
+    geom_bar(stat="identity") +
+    facet_grid(SEX ~ IMD_QUINTILE) +
+    theme_bw() + 
+    ylab(y_lab) +
+    xlab("Age of GPs") +
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          plot.margin = unit(c(1, 1, 1, 1), "lines"),
+          axis.text.x = element_text(angle = 90, hjust = 1)) +
+    labs(title = "Age/Sex distribution of GP supply by neighbourhood deprivation quintile",
+         subtitle = paste0("Data for England in years ",year," based on IMD 2019 quintiles"),
+         caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
+  
+  return(gp_plot)
+ }
