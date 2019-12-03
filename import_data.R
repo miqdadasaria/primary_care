@@ -37,7 +37,14 @@ write_lsoa_01_11_mapping = function(database_name="primary_care_data.sqlite3"){
 }
 
 format_ons_pop = function(year, sex){
-  xl = read_excel(path=paste0("raw_data/ons_pop/SAPE20DT2-mid-",year,"-lsoa-syoa-estimates-unformatted.xls"),
+  if(year<2018){
+    num="20"
+    ext="xls"
+  } else {
+    num="21"
+    ext="xlsx"
+  }
+  xl = read_excel(path=paste0("raw_data/ons_pop/SAPE",num,"DT2-mid-",year,"-lsoa-syoa-estimates-unformatted.",ext),
                   sheet=paste0("Mid-",year," ",sex),
                   skip=4,
                   trim_ws=TRUE)
@@ -84,7 +91,7 @@ format_ons_pop_old = function(year, sex){
 write_population_data_to_db = function(database_name="primary_care_data.sqlite3"){
   db = dbConnect(SQLite(), dbname=database_name)
   dbRemoveTable(db,"ons_pop",fail_if_missing=FALSE)
-  for (year in 2002:2017) {
+  for (year in 2002:2018) {
     for(sex in c("Males","Females")){
       if(year>2011){
         pop = format_ons_pop(year,sex)
@@ -99,10 +106,10 @@ write_population_data_to_db = function(database_name="primary_care_data.sqlite3"
 
 
 write_imd_2019_data_to_db = function(database_name="primary_care_data.sqlite3"){
-  imd_2019 = read_csv("raw_data/imd/File_7_-_All_IoD2019_Scores__Ranks__Deciles_and_Population_Denominators_2.csv") %>% select(c(1,5,6,7))
-  names(imd_2019) = c("LSOA11CD","IMD_SCORE","IMD_RANK","IMD_DECILE")
+  imd_2019 = read_csv("raw_data/imd/File_7_-_All_IoD2019_Scores__Ranks__Deciles_and_Population_Denominators_2.csv") %>% select(c(1,5,17,6,7))
+  names(imd_2019) = c("LSOA11CD","IMD_SCORE","IMD_HEALTH_SCORE","IMD_RANK","IMD_DECILE")
   imd_2019 = imd_2019 %>% add_quintiles()
- 
+  
   db = dbConnect(SQLite(), dbname=database_name)
   dbWriteTable(conn = db, name = "imd_2019", imd_2019, overwrite=TRUE)
   dbDisconnect(db)
@@ -353,35 +360,15 @@ write_workforce_data_to_db = function(database_name="primary_care_data.sqlite3")
   dbDisconnect(db)
 }
 
-write_ons_pop_by_imd = function(database_name="primary_care_data.sqlite3"){
-  decile_pop = read_excel("raw_data/ons_pop/populationbyageimdengland20012017.xls",
-                          sheet = "Table 1",
-                          skip = 12)
-  decile_pop = decile_pop %>% select(YEAR=Year,SEX=Sex,AGE=Age,IMD_DECILE=`IMD decile`,POP=Count)
-  
-  quintile_pop = read_excel("raw_data/ons_pop/populationbyageimdengland20012017.xls",
-                          sheet = "Table 2",
-                          skip = 12)
-  quintile_pop = quintile_pop %>% select(YEAR=Year,SEX=Sex,AGE=Age,IMD_QUINTILE=`IMD quintile`,POP=Count)
-  
-  db = dbConnect(SQLite(), dbname=database_name)
-  dbWriteTable(conn=db, name="ons_pop_decile", decile_pop, overwrite=TRUE)
-  
-  dbWriteTable(conn=db, name="ons_pop_quintile", quintile_pop, overwrite=TRUE)
-  
-  dbDisconnect(db)
-}
-
 write_carr_hill_population_data_to_db = function(database_name="primary_care_data.sqlite3"){
   db = dbConnect(SQLite(), dbname=database_name)
   dbRemoveTable(db,"carr_hill_pop",fail_if_missing=FALSE)
-  
-  imd_health = tbl(db, "imd_2015") %>% 
-    filter(DIMENSION=="HEALTH" & MEASURE=="Score") %>%
-    select(LSOA11CD,IMD_HEALTH=VALUE) %>%
+
+  imd_health = tbl(db, "imd_2019") %>% 
+    select(LSOA11CD,IMD_HEALTH=IMD_HEALTH_SCORE) %>%
     collect()
   
-  for (year in 2002:2017) {
+  for (year in 2002:2018) {
     if(year>2011){
       male_pop = format_ons_pop(year,"Males")
       female_pop = format_ons_pop(year,"Females")
@@ -551,7 +538,7 @@ calculate_gp_practice_imd_2019 = function(database_name="primary_care_data.sqlit
   db = dbConnect(SQLite(), dbname=database_name)
   ads = tbl(db, "ads_prac_props") %>% collect()
   imd = tbl(db, "imd_2019") %>% select(LSOA11CD,IMD_SCORE) %>% collect()
-  pop = tbl(db, "carr_hill_pop") %>% filter(YEAR==2015) %>% select(LSOA11CD,TOTAL_POP,NEED_ADJ_POP) %>% collect()
+  pop = tbl(db, "carr_hill_pop") %>% filter(YEAR==2015) %>% select(LSOA11CD,TOTAL_POP) %>% collect()
   
   prac_imd = ads %>% inner_join(imd) %>% inner_join(pop) %>%
     group_by(YEAR,PRAC_CODE) %>%
@@ -685,34 +672,18 @@ attribute_workforce_to_imd_lsoa_level = function(database_name="primary_care_dat
 
 ccg_populations = function(database_name="primary_care_data.sqlite3"){
   db = dbConnect(SQLite(), dbname=database_name)
-  dbRemoveTable(db,"lsoa_total_pop",fail_if_missing=FALSE)
-  
-  for(year in 2015:2018){
-    if(year %in% 2015:2017){
-      pop_path = paste0("raw_data/ons_pop/SAPE20DT2-mid-",year,"-lsoa-syoa-estimates-unformatted.xls")
-    } else if(year ==2018) {
-      pop_path  = "raw_data/ons_pop/SAPE21DT1a-mid-2018-on-2019-LA-lsoa-syoa-estimates-formatted.xlsx"
-    } 
-    xl = read_excel(path=pop_path,
-                    sheet=paste0("Mid-",year," ","Persons"),
-                    skip=4,
-                    trim_ws=TRUE)
-    lsoa_pop = xl %>% 
-      mutate(YEAR=as.integer(year)) %>%
-      select(YEAR, LSOA11CD="Area Codes", POP="All Ages") %>%
-      filter(grepl("^E01",LSOA11CD))
-    dbWriteTable(conn = db, name = "lsoa_total_pop", lsoa_pop, append=TRUE)
-  }
   
   ccg_lsoa = tbl(db, "ccg_lsoa_lad_mapping") %>% 
     select(LSOA11CD,CCG19CD) %>%
     collect()
   
-  lsoa_pop = tbl(db, "lsoa_total_pop") %>% collect()
+  lsoa_pop = tbl(db, "carr_hill_pop") %>% 
+    select(YEAR,LSOA11CD,TOTAL_POP,NEED_ADJ_POP) %>% 
+    collect()
   
   ccg_pop = inner_join(ccg_lsoa, lsoa_pop) %>%
     group_by(YEAR, CCG19CD) %>%
-    summarise(POP=sum(POP))
+    summarise(TOTAL_POP=sum(TOTAL_POP),NEED_ADJ_POP=sum(NEED_ADJ_POP))
   
   dbWriteTable(conn = db, name = "ccg_pop", ccg_pop, overwrite=TRUE)
   
@@ -751,7 +722,6 @@ ccg_workforce = function(database_name="primary_care_data.sqlite3"){
   
   dbWriteTable(conn = db, name = "ccg_workforce_imputed", workforce_ccg, overwrite=TRUE)
   
-  
   dbDisconnect(db)
 }
 
@@ -763,18 +733,18 @@ make_england_geojson = function(database_name="primary_care_data.sqlite3"){
                       verbose=FALSE, stringsAsFactors=FALSE)
     ccg_map = spTransform(ccg_map, CRS("+proj=longlat +ellps=WGS84"))
     db = dbConnect(SQLite(), dbname=database_name)
-    ccg_pop = tbl(db, "ccg_pop") %>% filter(YEAR==year) %>% select(CCG19CD,POP) %>% collect()
+    ccg_pop = tbl(db, "ccg_pop") %>% filter(YEAR==year) %>% select(CCG19CD,TOTAL_POP,NEED_ADJ_POP) %>% collect()
     ccg_imd = tbl(db,"ccg_imd_2019") %>% select(CCG19CD,IMD_SCORE=average_score) %>% collect()
     ccg_workforce = tbl(db,"ccg_workforce_imputed") %>% filter(YEAR==year) %>% select(CCG19CD,TOTAL_GP_EXRRL_HC, TOTAL_GP_EXRRL_FTE, TOTAL_NURSES_FTE,TOTAL_DPC_FTE,TOTAL_ADMIN_FTE) %>% collect()
     dbDisconnect(db)
     
     ccg_data = ccg_imd %>% inner_join(ccg_pop) %>% inner_join(ccg_workforce) %>% 
-      mutate(GP_HC_100k=round(100000*TOTAL_GP_EXRRL_HC/POP,2),
-             GP_FTE_100k = round(100000*TOTAL_GP_EXRRL_FTE/POP,2),
-             NURSE_FTE_100k = round(100000*TOTAL_NURSES_FTE/POP,2),
-             DPC_FTE_100k = round(100000*TOTAL_DPC_FTE/POP,2),
-             ADMIN_FTE_100k = round(100000*TOTAL_ADMIN_FTE/POP,2)) %>%
-      select(ccg19cd=CCG19CD,IMD_SCORE,TOTAL_POP=POP,GP_HC_100k,GP_FTE_100k,NURSE_FTE_100k,DPC_FTE_100k,ADMIN_FTE_100k)
+      mutate(GP_HC_100k=round(100000*TOTAL_GP_EXRRL_HC/TOTAL_POP,2),
+             GP_FTE_100k = round(100000*TOTAL_GP_EXRRL_FTE/TOTAL_POP,2),
+             NURSE_FTE_100k = round(100000*TOTAL_NURSES_FTE/TOTAL_POP,2),
+             DPC_FTE_100k = round(100000*TOTAL_DPC_FTE/TOTAL_POP,2),
+             ADMIN_FTE_100k = round(100000*TOTAL_ADMIN_FTE/TOTAL_POP,2)) %>%
+      select(ccg19cd=CCG19CD,IMD_SCORE,TOTAL_POP,NEED_ADJ_POP,GP_HC_100k,GP_FTE_100k,NURSE_FTE_100k,DPC_FTE_100k,ADMIN_FTE_100k)
     
     ccg_map@data = ccg_map@data %>% left_join(ccg_data)
     writeOGR(ccg_map, dsn=paste0("maps/ccg_",year,"_map.geojson"), layer="OGRGeoJSON", driver="GeoJSON", check_exists=FALSE)
@@ -787,7 +757,7 @@ make_ccg_geojson = function(database_name="primary_care_data.sqlite3"){
                      verbose=FALSE, stringsAsFactors=FALSE)
   db = dbConnect(SQLite(), dbname=database_name)
   ccg_lsoa = tbl(db, "ccg_lsoa_lad_mapping") %>% select(CCG19CD,LSOA11CD) %>% collect()
-  lsoa_workforce = tbl(db,"gp_workforce_newdata_lsoa_imputed") %>% select(YEAR, LSOA11CD, TOTAL_GP_EXRRL_HC, TOTAL_GP_EXRRL_FTE, TOTAL_NURSES_FTE,TOTAL_DPC_FTE,TOTAL_ADMIN_FTE,TOTAL_POP, IMD_SCORE, IMD_QUINTILE) %>% collect()
+  lsoa_workforce = tbl(db,"gp_workforce_newdata_lsoa_imputed") %>% select(YEAR, LSOA11CD, TOTAL_GP_EXRRL_HC, TOTAL_GP_EXRRL_FTE, TOTAL_NURSES_FTE,TOTAL_DPC_FTE,TOTAL_ADMIN_FTE,TOTAL_POP,NEED_ADJ_POP,IMD_SCORE,IMD_QUINTILE) %>% collect()
   dbDisconnect(db)
   
   for (year in 2015:2018) {
@@ -803,7 +773,7 @@ make_ccg_geojson = function(database_name="primary_care_data.sqlite3"){
                NURSE_FTE_100k = round(100000*TOTAL_NURSES_FTE/TOTAL_POP,2),
                DPC_FTE_100k = round(100000*TOTAL_DPC_FTE/TOTAL_POP,2),
                ADMIN_FTE_100k = round(100000*TOTAL_ADMIN_FTE/TOTAL_POP,2)) %>%
-        select(lsoa11cd=LSOA11CD,IMD_SCORE,IMD_QUINTILE,TOTAL_POP,GP_HC_100k,GP_FTE_100k,NURSE_FTE_100k,DPC_FTE_100k,ADMIN_FTE_100k)
+        select(lsoa11cd=LSOA11CD,IMD_SCORE,IMD_QUINTILE,TOTAL_POP,NEED_ADJ_POP,GP_HC_100k,GP_FTE_100k,NURSE_FTE_100k,DPC_FTE_100k,ADMIN_FTE_100k)
       ccg_lsoa_map@data = ccg_lsoa_map@data %>% left_join(ccg_data)
       writeOGR(ccg_lsoa_map, dsn=paste0("maps/ccg_lsoa_",ccg,"_",year,"_map.geojson"), layer="OGRGeoJSON", driver="GeoJSON", check_exists=FALSE)
       
@@ -818,7 +788,6 @@ make_ccg_geojson = function(database_name="primary_care_data.sqlite3"){
     ccg_imd_2019 = tbl(db, "ccg_imd_2019") %>% collect()
     ccg_lsoa_lad_mapping = tbl(db, "ccg_lsoa_lad_mapping") %>% collect()
     ccg_ons_code_mapping = tbl(db, "ccg_ons_code_mapping") %>% collect()
-    ccg_pop = tbl(db, "ccg_pop") %>% collect()
     ccg_practice_mapping = tbl(db, "ccg_practice_mapping") %>% collect()
     ccg_workforce_imputed = tbl(db, "ccg_workforce_imputed") %>% collect()
     gp_imd_2019 = tbl(db, "gp_imd_2019") %>% collect()
@@ -832,7 +801,6 @@ make_ccg_geojson = function(database_name="primary_care_data.sqlite3"){
     dbWriteTable(conn = db2, name = "ccg_imd_2019", ccg_imd_2019, overwrite=TRUE)
     dbWriteTable(conn = db2, name = "ccg_lsoa_lad_mapping", ccg_lsoa_lad_mapping, overwrite=TRUE)
     dbWriteTable(conn = db2, name = "ccg_ons_code_mapping", ccg_ons_code_mapping, overwrite=TRUE)
-    dbWriteTable(conn = db2, name = "ccg_pop", ccg_pop, overwrite=TRUE)
     dbWriteTable(conn = db2, name = "ccg_practice_mapping", ccg_practice_mapping, overwrite=TRUE)
     dbWriteTable(conn = db2, name = "ccg_workforce_imputed", ccg_workforce_imputed, overwrite=TRUE)
     dbWriteTable(conn = db2, name = "gp_imd_2019", gp_imd_2019, overwrite=TRUE)

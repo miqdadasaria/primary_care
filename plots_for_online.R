@@ -22,10 +22,9 @@ make_data_table = function(x_var, y_var, adj_method, year, geography, trim_outli
     graph_data = graph_data %>% inner_join(names) %>% rename(ONS_CODE=LSOA11CD, NAME=LSOA11NM)
   } else if(geography == "ccg"){
     data = tbl(db,"ccg_workforce_imputed") %>% filter(YEAR==year) %>% collect()
-    pop = tbl(db, "ccg_pop") %>% filter(YEAR==year) %>% collect()
     imd = tbl(db, "ccg_imd_2019") %>% select(CCG19CD,IMD_SCORE=average_score,IMD_RANK=rank_average_score) %>% collect()
     names = tbl(db,"ccg_ons_code_mapping") %>% select(CCG19CD,CCG19NM) %>% distinct(CCG19CD,CCG19NM) %>% collect()
-    graph_data = data %>% inner_join(pop) %>% inner_join(imd) %>% inner_join(names)
+    graph_data = data %>% inner_join(imd) %>% inner_join(names)
     graph_data = graph_data %>% rename(ONS_CODE=CCG19CD, NAME=CCG19NM)
   } else if(geography == "gp_practice"){
     # TODO: investigate why too many practices in workforce with 0 patient populations
@@ -75,6 +74,7 @@ make_var_label = function(varname){
   label = gsub("_EXRRL","_excluding registrars, retainers and locums",label)
   label = gsub("_POP","_population",label)
   label = gsub("IMD_","index of multiple deprivation (2019)_",label)
+  label = gsub("_ADJ_","_adjusted_",label) 
   label = gsub("_"," ",label)
   label = lapply(strwrap(as.character(str_to_lower(label)), width=40, simplify=FALSE), paste, collapse="\n")
   return(label)

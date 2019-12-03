@@ -18,6 +18,7 @@ make_popup_messages = function(map, selected_ccg){
     popup_messages = paste0("<b>Name: </b>",map$ccg19nm,"<br>",
                           "<b>IMD 2019 Score: </b>",map$IMD_SCORE,"<br>",
                           "<b>Total Population: </b>",map$TOTAL_POP,"<br>",
+                          "<b>Need Adjusted Population: </b>",round(map$NEED_ADJ_POP,0),"<br>",
                           "<b>GPs headcount (EXRRL) per 100k population: </b>",map$GP_HC_100k,"<br>",
                           "<b>GPs FTE (EXRRL) per 100k population: </b>",map$GP_FTE_100k,"<br>",
                           "<b>Nurses FTE per 100k population: </b>",map$NURSE_FTE_100k,"<br>",
@@ -28,6 +29,7 @@ make_popup_messages = function(map, selected_ccg){
                             "<b>IMD 2019 Score: </b>",map$IMD_SCORE,"<br>",
                             "<b>IMD 2019 Quintile: </b>",map$IMD_QUINTILE,"<br>",
                             "<b>Total Population: </b>",map$TOTAL_POP,"<br>",
+                            "<b>Need Adjusted Population: </b>",round(map$NEED_ADJ_POP,0),"<br>",
                             "<b>GPs headcount (EXRRL) per 100k population: </b>",map$GP_HC_100k,"<br>",
                             "<b>GPs FTE (EXRRL) per 100k population: </b>",map$GP_FTE_100k,"<br>",
                             "<b>Nurses FTE per 100k population: </b>",map$NURSE_FTE_100k,"<br>",
@@ -46,13 +48,14 @@ make_gp_markers = function(year, database_name="primary_care_data_online.sqlite3
   gp_practice_data = data %>% inner_join(pop) %>% inner_join(imd) %>% inner_join(geo)  
   dbDisconnect(db)
   gp_practices = gp_practice_data %>%
-    select(PRAC_NAME, PRAC_CODE, IMD_SCORE, IMD_QUINTILE, TOTAL_POP,
+    select(PRAC_NAME, PRAC_CODE, IMD_SCORE, IMD_QUINTILE, TOTAL_POP, NEED_ADJ_POP,
            TOTAL_GP_EXRRL_HC, TOTAL_GP_EXRRL_FTE,
            TOTAL_NURSES_FTE,TOTAL_DPC_FTE,TOTAL_ADMIN_FTE,LONG,LAT) %>%
     mutate(description = paste0("<b>Name: </b>",str_to_title(PRAC_NAME),"<br>",
                                 "<b>IMD 2019 Score: </b>",round(IMD_SCORE,2),"<br>",
                                 "<b>IMD 2019 Quintile: </b>",IMD_QUINTILE,"<br>",
                                 "<b>Total Population: </b>",round(TOTAL_POP,0),"<br>",
+                                "<b>Need Adjusted Population: </b>",round(NEED_ADJ_POP,0),"<br>",
                                 "<b>GPs headcount (EXRRL): </b>",TOTAL_GP_EXRRL_HC,"<br>",
                                 "<b>GPs FTE (EXRRL) per 100k population: </b>",round(100000*TOTAL_GP_EXRRL_FTE/TOTAL_POP,2),"<br>",
                                 "<b>Nurses FTE per 100k population: </b>",round(100000*TOTAL_NURSES_FTE/TOTAL_POP,2),"<br>",
