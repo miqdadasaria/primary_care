@@ -105,7 +105,15 @@ ui = shinyUI(fluidPage(theme = "sandstone.css",
                            
                            radioButtons("trim_outliers", "Trim outliers on scatter plots:",
                                         list(TRUE,FALSE),
-                                        selected=TRUE)
+                                        selected=TRUE),
+                           tags$div(
+                               HTML("<small><small>
+         <p>This site was produced by <a href='http://www.lse.ac.uk/lse-health/people/miqdad-asaria'>Miqdad Asaria</a> 
+         as part of a fellowship funded by the <a href='https://www.health.org.uk'>Health Foundation</a>
+         based at the <a href='https://www.lse.ac.uk/'>London School of Economics</a>. 
+         <p>Source code can be found <a href='https://github.com/miqdadasaria/primary_care'>here</a>.
+         </small></small>")
+                           )
                            
                        ),
                        
