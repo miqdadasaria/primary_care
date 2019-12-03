@@ -76,7 +76,7 @@ ui = shinyUI(fluidPage(theme = "sandstone.css",
 
                            
                            selectInput("x_var", "X variable for scatter plot:",
-                                       list("IMD_SCORE","IMD_RANK","TOTAL_POP"),
+                                       list("IMD_SCORE","IMD_RANK","TOTAL_POP","TOTAL_GP_EXRRL_FTE"),
                                        selected = "IMD_SCORE"
                            ),
                            

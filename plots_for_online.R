@@ -67,23 +67,25 @@ make_data_table = function(x_var, y_var, adj_method, year, geography, trim_outli
   return(graph_data)
 }
 
-make_var_label = function(y_var){
-  y_lab = gsub("_"," ",y_var)
-  
-  y_lab = gsub("HC","headcount",y_lab)
-  y_lab = gsub("FTE","fulltime equivalent",y_lab)
-  y_lab = gsub("EXL","excluding locums",y_lab)
-  y_lab = gsub("EXRL","excluding registrars and locums",y_lab)
-  y_lab = gsub("EXRRL","excluding registrars, retainers and locums",y_lab)
-  y_lab = lapply(strwrap(as.character(str_to_lower(y_lab)), width=40, simplify=FALSE), paste, collapse="\n")
-  return(y_lab)
+make_var_label = function(varname){
+  label = gsub("_HC","_headcount",varname)
+  label = gsub("_FTE","_fulltime equivalent",label)
+  label = gsub("_EXL","_excluding locums",label)
+  label = gsub("_EXRL","_excluding registrars and locums",label)
+  label = gsub("_EXRRL","_excluding registrars, retainers and locums",label)
+  label = gsub("_POP","_population",label)
+  label = gsub("IMD_","index of multiple deprivation (2019)_",label)
+  label = gsub("_"," ",label)
+  label = lapply(strwrap(as.character(str_to_lower(label)), width=40, simplify=FALSE), paste, collapse="\n")
+  return(label)
 }
 
 workforce_scatter_plot = function(x_var, y_var, adj_method, year, geography, trim_outliers){
     graph_data = make_data_table(x_var, y_var, adj_method, year, geography, trim_outliers)
     
     y_lab = make_var_label(y_var)
-    
+    x_lab = make_var_label(x_var)
+      
     if(adj_method=="pop"){
       y_lab = paste0(y_lab," per 100,000 population")
     } else if(adj_method=="adj_pop"){
@@ -92,12 +94,16 @@ workforce_scatter_plot = function(x_var, y_var, adj_method, year, geography, tri
     
     scatter_plot = ggplot(graph_data, aes(x=x, y=y)) +
       geom_point(alpha=0.6, aes(colour=`IMD (2019) score`, size=`Total population`))  +
-      xlab(str_to_lower(gsub("_"," ",x_var))) +
+      xlab(x_lab) +
       ylab(y_lab) +
       stat_smooth(method='lm', colour="darkred", size=0.5, linetype=2, alpha=0.5, se=FALSE) +
       theme_minimal() +
       scale_color_distiller("IMD (2019) score", palette="YlGn", direction=1) +
-      scale_size_continuous("Total population")
+      scale_size_continuous("Total population") +
+      labs(title = "Trends in primary care supply by neighbourhood deprivation",
+           subtitle = paste0("Data for England in ",year," based on IMD 2019 quintiles"),
+           caption = "Note: Low IMD score means more affluent - high IMD score means more deprived; Low IMD rank means more deprived - high IMD rank means more affluent")
+    
     
     return(scatter_plot)
 
@@ -148,7 +154,7 @@ imd_plot = function(y_var, adj_method, database_name="primary_care_data_online.s
           plot.margin = unit(c(1, 1, 1, 1), "lines"),
           text=element_text(family = "Roboto", colour = "#3e3f3a"),
           legend.position = "bottom") +
-    labs(title = "Trends in GP supply by neighbourhood deprivation",
+    labs(title = "Trends in primary care supply by neighbourhood deprivation",
          subtitle = paste0("Data for England in years ",start_year," - ",end_year," based on IMD 2019 quintiles"),
          caption = "Note: Data are from NHS Digital (workforce), ONS (population and LSOA) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
   
