@@ -117,20 +117,23 @@ write_imd_2019_data_to_db = function(database_name="primary_care_data.sqlite3"){
 
 
 
-write_workforce_data_to_db_new = function(database_name="primary_care_data.sqlite3"){
-  gp_vars=c("TOTAL_GP_HC","TOTAL_GP_EXL_HC","TOTAL_GP_EXRL_HC","TOTAL_GP_EXRRL_HC","TOTAL_GP_SEN_PTNR_HC","TOTAL_GP_PTNR_PROV_HC","TOTAL_GP_SAL_BY_PRAC_HC","TOTAL_GP_SAL_BY_OTH_HC","TOTAL_GP_REG_ST3_4_HC","TOTAL_GP_REG_F1_2_HC","TOTAL_GP_RET_HC","TOTAL_GP_LOCUM_VAC_HC","TOTAL_GP_LOCUM_ABS_HC","TOTAL_GP_LOCUM_OTH_HC",
-          "MALE_GP_EXRRL_HC","MALE_GP_REG_ST3_4_HC","MALE_GP_RET_HC","FEMALE_GP_EXRRL_HC","FEMALE_GP_REG_ST3_4_HC","FEMALE_GP_RET_HC",
-          "TOTAL_GP_FTE","TOTAL_GP_EXL_FTE","TOTAL_GP_EXRL_FTE","TOTAL_GP_EXRRL_FTE","TOTAL_GP_SEN_PTNR_FTE","TOTAL_GP_PTNR_PROV_FTE","TOTAL_GP_SAL_BY_PRAC_FTE","TOTAL_GP_SAL_BY_OTH_FTE","TOTAL_GP_REG_ST3_4_FTE","TOTAL_GP_REG_F1_2_FTE","TOTAL_GP_RET_FTE","TOTAL_GP_LOCUM_VAC_FTE","TOTAL_GP_LOCUM_ABS_FTE","TOTAL_GP_LOCUM_OTH_FTE",
-          "MALE_GP_EXRRL_FTE","MALE_GP_REG_ST3_4_FTE","MALE_GP_RET_FTE","FEMALE_GP_EXRRL_FTE","FEMALE_GP_REG_ST3_4_FTE","FEMALE_GP_RET_FTE",
-          "MALE_GP_EXRRL_HC_UNDER30","MALE_GP_EXRRL_HC_30TO34","MALE_GP_EXRRL_HC_35TO39","MALE_GP_EXRRL_HC_40TO44","MALE_GP_EXRRL_HC_45TO49","MALE_GP_EXRRL_HC_50TO54","MALE_GP_EXRRL_HC_55TO59","MALE_GP_EXRRL_HC_60TO64","MALE_GP_EXRRL_HC_65TO69","MALE_GP_EXRRL_HC_70PLUS","MALE_GP_EXRRL_HC_UNKNOWN_AGE",
-          "FEMALE_GP_EXRRL_HC_UNDER30","FEMALE_GP_EXRRL_HC_30TO34","FEMALE_GP_EXRRL_HC_35TO39","FEMALE_GP_EXRRL_HC_40TO44","FEMALE_GP_EXRRL_HC_45TO49","FEMALE_GP_EXRRL_HC_50TO54","FEMALE_GP_EXRRL_HC_55TO59","FEMALE_GP_EXRRL_HC_60TO64","FEMALE_GP_EXRRL_HC_65TO69","FEMALE_GP_EXRRL_HC_70PLUS","FEMALE_GP_EXRRL_HC_UNKNOWN_AGE",
-          "TOTAL_NURSES_HC","TOTAL_N_PRAC_NURSE_HC","TOTAL_N_ADV_NURSE_PRAC_HC","TOTAL_N_NURSE_SPEC_HC","TOTAL_N_EXT_ROLE_NURSE_HC","TOTAL_N_TRAINEE_NURSE_HC","TOTAL_N_DISTRICT_NURSE_HC","TOTAL_N_NURSE_DISP_HC",
-          "TOTAL_NURSES_FTE","TOTAL_N_PRAC_NURSE_FTE","TOTAL_N_ADV_NURSE_PRAC_FTE","TOTAL_N_NURSE_SPEC_FTE","TOTAL_N_EXT_ROLE_NURSE_FTE","TOTAL_N_TRAINEE_NURSE_FTE","TOTAL_N_DISTRICT_NURSE_FTE","TOTAL_N_NURSE_DISP_FTE",
-          "TOTAL_DPC_HC","TOTAL_DPC_DISPENSER_HC","TOTAL_DPC_HCA_HC","TOTAL_DPC_PHLEB_HC","TOTAL_DPC_PHARMA_HC","TOTAL_DPC_PHYSIO_HC","TOTAL_DPC_PODIA_HC","TOTAL_DPC_PHYSICIAN_ASSOC_HC","TOTAL_DPC_OTH_HC",
-          "TOTAL_DPC_FTE","TOTAL_DPC_DISPENSER_FTE","TOTAL_DPC_HCA_FTE","TOTAL_DPC_PHLEB_FTE","TOTAL_DPC_PHARMA_FTE","TOTAL_DPC_PHYSIO_FTE","TOTAL_DPC_PODIA_FTE","TOTAL_DPC_PHYSICIAN_ASSOC_FTE","TOTAL_DPC_OTH_FTE",
-          "TOTAL_ADMIN_HC","TOTAL_ADMIN_MANAGER_HC","TOTAL_ADMIN_MED_SECRETARY_HC","TOTAL_ADMIN_RECEPT_HC","TOTAL_ADMIN_TELEPH_HC","TOTAL_ADMIN_ESTATES_ANC_HC","TOTAL_ADMIN_OTH_HC",
-          "TOTAL_ADMIN_FTE","TOTAL_ADMIN_MANAGER_FTE","TOTAL_ADMIN_MED_SECRETARY_FTE","TOTAL_ADMIN_RECEPT_FTE","TOTAL_ADMIN_TELEPH_FTE","TOTAL_ADMIN_ESTATES_ANC_FTE","TOTAL_ADMIN_OTH_FTE")
+write_workforce_varlist_to_db = function(database_name="primary_care_data.sqlite3"){
+  varlist = read_csv("raw_data/workforce/GPs 2015-2018/varlist.csv")
+  db = dbConnect(SQLite(), dbname=database_name)
+  dbWriteTable(conn = db, name = "workforce_variables", varlist, overwrite=TRUE)
+  dbDisconnect(db)
+}
 
+get_workforce_varlist = function(database_name="primary_care_data.sqlite3"){
+  db = dbConnect(SQLite(), dbname=database_name)
+  workforce_vars =tbl(db,"workforce_variables") %>% filter(ATTRIBUTE==TRUE) %>% select(VARNAMES) %>% collect()
+  dbDisconnect(db)
+  return(workforce_vars$VARNAMES)
+}
+write_workforce_data_to_db_new = function(database_name="primary_care_data.sqlite3"){
+  db = dbConnect(SQLite(), dbname=database_name)
+  gp_vars=get_workforce_varlist()
+  
   gp_year = list()
   for (year in 2015:2018) {
     wf = read_csv(paste0("raw_data/workforce/GPs 2015-2018/General Practice September ",year," Practice Level.csv"),
@@ -139,13 +142,13 @@ write_workforce_data_to_db_new = function(database_name="primary_care_data.sqlit
     wf = wf %>% mutate(YEAR=year)
     
     gp_year[[as.character(year)]] = wf %>%
-      select(YEAR,PRAC_CODE,PRAC_NAME,CONTRACT,TOTAL_PATIENTS,MALE_PATIENTS_0TO4:FEMALE_PATIENTS_85PLUS, gp_vars)
+      select(YEAR,PRAC_CODE,PRAC_NAME,CONTRACT, gp_vars)
   }
   
   workforce = map_dfr(gp_year,bind_rows) %>% 
     arrange(YEAR,PRAC_CODE)
 
-  db = dbConnect(SQLite(), dbname=database_name)
+
   dbWriteTable(conn=db, name="gp_workforce_newdata", workforce, overwrite=TRUE)
   dbDisconnect(db)
 
@@ -180,18 +183,7 @@ impute_missing_gp_data_lm = function(database_name="primary_care_data.sqlite3"){
   gp_workforce = tbl(db, "gp_workforce_newdata") %>% filter(YEAR>2014) %>% collect() 
   
   gp_workforce_imputed = gp_workforce
-  gp_vars=c("TOTAL_GP_HC","TOTAL_GP_EXL_HC","TOTAL_GP_EXRL_HC","TOTAL_GP_EXRRL_HC","TOTAL_GP_SEN_PTNR_HC","TOTAL_GP_PTNR_PROV_HC","TOTAL_GP_SAL_BY_PRAC_HC","TOTAL_GP_SAL_BY_OTH_HC","TOTAL_GP_REG_ST3_4_HC","TOTAL_GP_REG_F1_2_HC","TOTAL_GP_RET_HC","TOTAL_GP_LOCUM_VAC_HC","TOTAL_GP_LOCUM_ABS_HC","TOTAL_GP_LOCUM_OTH_HC",
-            "MALE_GP_EXRRL_HC","MALE_GP_REG_ST3_4_HC","MALE_GP_RET_HC","FEMALE_GP_EXRRL_HC","FEMALE_GP_REG_ST3_4_HC","FEMALE_GP_RET_HC",
-            "TOTAL_GP_FTE","TOTAL_GP_EXL_FTE","TOTAL_GP_EXRL_FTE","TOTAL_GP_EXRRL_FTE","TOTAL_GP_SEN_PTNR_FTE","TOTAL_GP_PTNR_PROV_FTE","TOTAL_GP_SAL_BY_PRAC_FTE","TOTAL_GP_SAL_BY_OTH_FTE","TOTAL_GP_REG_ST3_4_FTE","TOTAL_GP_REG_F1_2_FTE","TOTAL_GP_RET_FTE","TOTAL_GP_LOCUM_VAC_FTE","TOTAL_GP_LOCUM_ABS_FTE","TOTAL_GP_LOCUM_OTH_FTE",
-            "MALE_GP_EXRRL_FTE","MALE_GP_REG_ST3_4_FTE","MALE_GP_RET_FTE","FEMALE_GP_EXRRL_FTE","FEMALE_GP_REG_ST3_4_FTE","FEMALE_GP_RET_FTE",
-            "MALE_GP_EXRRL_HC_UNDER30","MALE_GP_EXRRL_HC_30TO34","MALE_GP_EXRRL_HC_35TO39","MALE_GP_EXRRL_HC_40TO44","MALE_GP_EXRRL_HC_45TO49","MALE_GP_EXRRL_HC_50TO54","MALE_GP_EXRRL_HC_55TO59","MALE_GP_EXRRL_HC_60TO64","MALE_GP_EXRRL_HC_65TO69","MALE_GP_EXRRL_HC_70PLUS","MALE_GP_EXRRL_HC_UNKNOWN_AGE",
-            "FEMALE_GP_EXRRL_HC_UNDER30","FEMALE_GP_EXRRL_HC_30TO34","FEMALE_GP_EXRRL_HC_35TO39","FEMALE_GP_EXRRL_HC_40TO44","FEMALE_GP_EXRRL_HC_45TO49","FEMALE_GP_EXRRL_HC_50TO54","FEMALE_GP_EXRRL_HC_55TO59","FEMALE_GP_EXRRL_HC_60TO64","FEMALE_GP_EXRRL_HC_65TO69","FEMALE_GP_EXRRL_HC_70PLUS","FEMALE_GP_EXRRL_HC_UNKNOWN_AGE",
-            "TOTAL_NURSES_HC","TOTAL_N_PRAC_NURSE_HC","TOTAL_N_ADV_NURSE_PRAC_HC","TOTAL_N_NURSE_SPEC_HC","TOTAL_N_EXT_ROLE_NURSE_HC","TOTAL_N_TRAINEE_NURSE_HC","TOTAL_N_DISTRICT_NURSE_HC","TOTAL_N_NURSE_DISP_HC",
-            "TOTAL_NURSES_FTE","TOTAL_N_PRAC_NURSE_FTE","TOTAL_N_ADV_NURSE_PRAC_FTE","TOTAL_N_NURSE_SPEC_FTE","TOTAL_N_EXT_ROLE_NURSE_FTE","TOTAL_N_TRAINEE_NURSE_FTE","TOTAL_N_DISTRICT_NURSE_FTE","TOTAL_N_NURSE_DISP_FTE",
-            "TOTAL_DPC_HC","TOTAL_DPC_DISPENSER_HC","TOTAL_DPC_HCA_HC","TOTAL_DPC_PHLEB_HC","TOTAL_DPC_PHARMA_HC","TOTAL_DPC_PHYSIO_HC","TOTAL_DPC_PODIA_HC","TOTAL_DPC_PHYSICIAN_ASSOC_HC","TOTAL_DPC_OTH_HC",
-            "TOTAL_DPC_FTE","TOTAL_DPC_DISPENSER_FTE","TOTAL_DPC_HCA_FTE","TOTAL_DPC_PHLEB_FTE","TOTAL_DPC_PHARMA_FTE","TOTAL_DPC_PHYSIO_FTE","TOTAL_DPC_PODIA_FTE","TOTAL_DPC_PHYSICIAN_ASSOC_FTE","TOTAL_DPC_OTH_FTE",
-            "TOTAL_ADMIN_HC","TOTAL_ADMIN_MANAGER_HC","TOTAL_ADMIN_MED_SECRETARY_HC","TOTAL_ADMIN_RECEPT_HC","TOTAL_ADMIN_TELEPH_HC","TOTAL_ADMIN_ESTATES_ANC_HC","TOTAL_ADMIN_OTH_HC",
-            "TOTAL_ADMIN_FTE","TOTAL_ADMIN_MANAGER_FTE","TOTAL_ADMIN_MED_SECRETARY_FTE","TOTAL_ADMIN_RECEPT_FTE","TOTAL_ADMIN_TELEPH_FTE","TOTAL_ADMIN_ESTATES_ANC_FTE","TOTAL_ADMIN_OTH_FTE")
+  gp_vars =  get_workforce_varlist()
   
   for (variable in gp_vars) {
     print(variable)
@@ -206,6 +198,29 @@ impute_missing_gp_data_lm = function(database_name="primary_care_data.sqlite3"){
   
 }
 
+add_new_variables_to_imputation = function(database_name="primary_care_data.sqlite3"){
+  db = dbConnect(SQLite(), dbname=database_name)
+  gp_workforce_prev_imputed = tbl(db, "gp_workforce_newdata_imputed") %>% filter(YEAR>2014) %>% select(-contains("_PATIENTS")) %>% collect() 
+  already_imputed = names(gp_workforce_prev_imputed)
+  gp_workforce = tbl(db, "gp_workforce_newdata") %>% filter(YEAR>2014) %>% select(-already_imputed,"YEAR","PRAC_CODE") %>% collect() 
+  
+  gp_workforce_imputed = gp_workforce
+  gp_vars = get_workforce_varlist()
+  gp_vars = setdiff(gp_vars, already_imputed)
+  
+  for (variable in gp_vars) {
+    print(variable)
+    gp_workforce_nested = gp_workforce_imputed %>% 
+      group_by(PRAC_CODE) %>%
+      nest()
+    gp_workforce_imputed = map_linear_impute(gp_workforce_nested, variable, median(gp_workforce[[variable]], na.rm=TRUE))
+  }
+  
+  gp_workforce_updated_imputed = gp_workforce_prev_imputed %>% inner_join(gp_workforce_imputed)
+  dbWriteTable(conn=db, name="gp_workforce_newdata_imputed", gp_workforce_updated_imputed, overwrite=TRUE)
+  
+  dbDisconnect(db)
+}
 
 write_workforce_data_to_db = function(database_name="primary_care_data.sqlite3"){
   
@@ -575,18 +590,7 @@ calculate_gp_practice_populations = function(database_name="primary_care_data.sq
 
 attribute_workforce_to_imd_lsoa_level = function(database_name="primary_care_data.sqlite3", imputed=TRUE){
   db = dbConnect(SQLite(), dbname=database_name)
-  workforce_vars=c("TOTAL_GP_HC","TOTAL_GP_EXL_HC","TOTAL_GP_EXRL_HC","TOTAL_GP_EXRRL_HC","TOTAL_GP_SEN_PTNR_HC","TOTAL_GP_PTNR_PROV_HC","TOTAL_GP_SAL_BY_PRAC_HC","TOTAL_GP_SAL_BY_OTH_HC","TOTAL_GP_REG_ST3_4_HC","TOTAL_GP_REG_F1_2_HC","TOTAL_GP_RET_HC","TOTAL_GP_LOCUM_VAC_HC","TOTAL_GP_LOCUM_ABS_HC","TOTAL_GP_LOCUM_OTH_HC",
-            "MALE_GP_EXRRL_HC","MALE_GP_REG_ST3_4_HC","MALE_GP_RET_HC","FEMALE_GP_EXRRL_HC","FEMALE_GP_REG_ST3_4_HC","FEMALE_GP_RET_HC",
-            "TOTAL_GP_FTE","TOTAL_GP_EXL_FTE","TOTAL_GP_EXRL_FTE","TOTAL_GP_EXRRL_FTE","TOTAL_GP_SEN_PTNR_FTE","TOTAL_GP_PTNR_PROV_FTE","TOTAL_GP_SAL_BY_PRAC_FTE","TOTAL_GP_SAL_BY_OTH_FTE","TOTAL_GP_REG_ST3_4_FTE","TOTAL_GP_REG_F1_2_FTE","TOTAL_GP_RET_FTE","TOTAL_GP_LOCUM_VAC_FTE","TOTAL_GP_LOCUM_ABS_FTE","TOTAL_GP_LOCUM_OTH_FTE",
-            "MALE_GP_EXRRL_FTE","MALE_GP_REG_ST3_4_FTE","MALE_GP_RET_FTE","FEMALE_GP_EXRRL_FTE","FEMALE_GP_REG_ST3_4_FTE","FEMALE_GP_RET_FTE",
-            "MALE_GP_EXRRL_HC_UNDER30","MALE_GP_EXRRL_HC_30TO34","MALE_GP_EXRRL_HC_35TO39","MALE_GP_EXRRL_HC_40TO44","MALE_GP_EXRRL_HC_45TO49","MALE_GP_EXRRL_HC_50TO54","MALE_GP_EXRRL_HC_55TO59","MALE_GP_EXRRL_HC_60TO64","MALE_GP_EXRRL_HC_65TO69","MALE_GP_EXRRL_HC_70PLUS","MALE_GP_EXRRL_HC_UNKNOWN_AGE",
-            "FEMALE_GP_EXRRL_HC_UNDER30","FEMALE_GP_EXRRL_HC_30TO34","FEMALE_GP_EXRRL_HC_35TO39","FEMALE_GP_EXRRL_HC_40TO44","FEMALE_GP_EXRRL_HC_45TO49","FEMALE_GP_EXRRL_HC_50TO54","FEMALE_GP_EXRRL_HC_55TO59","FEMALE_GP_EXRRL_HC_60TO64","FEMALE_GP_EXRRL_HC_65TO69","FEMALE_GP_EXRRL_HC_70PLUS","FEMALE_GP_EXRRL_HC_UNKNOWN_AGE",
-            "TOTAL_NURSES_HC","TOTAL_N_PRAC_NURSE_HC","TOTAL_N_ADV_NURSE_PRAC_HC","TOTAL_N_NURSE_SPEC_HC","TOTAL_N_EXT_ROLE_NURSE_HC","TOTAL_N_TRAINEE_NURSE_HC","TOTAL_N_DISTRICT_NURSE_HC","TOTAL_N_NURSE_DISP_HC",
-            "TOTAL_NURSES_FTE","TOTAL_N_PRAC_NURSE_FTE","TOTAL_N_ADV_NURSE_PRAC_FTE","TOTAL_N_NURSE_SPEC_FTE","TOTAL_N_EXT_ROLE_NURSE_FTE","TOTAL_N_TRAINEE_NURSE_FTE","TOTAL_N_DISTRICT_NURSE_FTE","TOTAL_N_NURSE_DISP_FTE",
-            "TOTAL_DPC_HC","TOTAL_DPC_DISPENSER_HC","TOTAL_DPC_HCA_HC","TOTAL_DPC_PHLEB_HC","TOTAL_DPC_PHARMA_HC","TOTAL_DPC_PHYSIO_HC","TOTAL_DPC_PODIA_HC","TOTAL_DPC_PHYSICIAN_ASSOC_HC","TOTAL_DPC_OTH_HC",
-            "TOTAL_DPC_FTE","TOTAL_DPC_DISPENSER_FTE","TOTAL_DPC_HCA_FTE","TOTAL_DPC_PHLEB_FTE","TOTAL_DPC_PHARMA_FTE","TOTAL_DPC_PHYSIO_FTE","TOTAL_DPC_PODIA_FTE","TOTAL_DPC_PHYSICIAN_ASSOC_FTE","TOTAL_DPC_OTH_FTE",
-            "TOTAL_ADMIN_HC","TOTAL_ADMIN_MANAGER_HC","TOTAL_ADMIN_MED_SECRETARY_HC","TOTAL_ADMIN_RECEPT_HC","TOTAL_ADMIN_TELEPH_HC","TOTAL_ADMIN_ESTATES_ANC_HC","TOTAL_ADMIN_OTH_HC",
-            "TOTAL_ADMIN_FTE","TOTAL_ADMIN_MANAGER_FTE","TOTAL_ADMIN_MED_SECRETARY_FTE","TOTAL_ADMIN_RECEPT_FTE","TOTAL_ADMIN_TELEPH_FTE","TOTAL_ADMIN_ESTATES_ANC_FTE","TOTAL_ADMIN_OTH_FTE")
+  workforce_vars = get_workforce_varlist()
   
   if(imputed){
     gp_table = "gp_workforce_newdata_imputed"
@@ -670,42 +674,11 @@ attribute_workforce_to_imd_lsoa_level = function(database_name="primary_care_dat
     dbDisconnect(db)
 }
 
-ccg_populations = function(database_name="primary_care_data.sqlite3"){
-  db = dbConnect(SQLite(), dbname=database_name)
-  
-  ccg_lsoa = tbl(db, "ccg_lsoa_lad_mapping") %>% 
-    select(LSOA11CD,CCG19CD) %>%
-    collect()
-  
-  lsoa_pop = tbl(db, "carr_hill_pop") %>% 
-    select(YEAR,LSOA11CD,TOTAL_POP,NEED_ADJ_POP) %>% 
-    collect()
-  
-  ccg_pop = inner_join(ccg_lsoa, lsoa_pop) %>%
-    group_by(YEAR, CCG19CD) %>%
-    summarise(TOTAL_POP=sum(TOTAL_POP),NEED_ADJ_POP=sum(NEED_ADJ_POP))
-  
-  dbWriteTable(conn = db, name = "ccg_pop", ccg_pop, overwrite=TRUE)
-  
-  dbDisconnect(db)
-}
 
 ccg_workforce = function(database_name="primary_care_data.sqlite3"){
-  workforce_vars=c("TOTAL_GP_HC","TOTAL_GP_EXL_HC","TOTAL_GP_EXRL_HC","TOTAL_GP_EXRRL_HC","TOTAL_GP_SEN_PTNR_HC","TOTAL_GP_PTNR_PROV_HC","TOTAL_GP_SAL_BY_PRAC_HC","TOTAL_GP_SAL_BY_OTH_HC","TOTAL_GP_REG_ST3_4_HC","TOTAL_GP_REG_F1_2_HC","TOTAL_GP_RET_HC","TOTAL_GP_LOCUM_VAC_HC","TOTAL_GP_LOCUM_ABS_HC","TOTAL_GP_LOCUM_OTH_HC",
-                   "MALE_GP_EXRRL_HC","MALE_GP_REG_ST3_4_HC","MALE_GP_RET_HC","FEMALE_GP_EXRRL_HC","FEMALE_GP_REG_ST3_4_HC","FEMALE_GP_RET_HC",
-                   "TOTAL_GP_FTE","TOTAL_GP_EXL_FTE","TOTAL_GP_EXRL_FTE","TOTAL_GP_EXRRL_FTE","TOTAL_GP_SEN_PTNR_FTE","TOTAL_GP_PTNR_PROV_FTE","TOTAL_GP_SAL_BY_PRAC_FTE","TOTAL_GP_SAL_BY_OTH_FTE","TOTAL_GP_REG_ST3_4_FTE","TOTAL_GP_REG_F1_2_FTE","TOTAL_GP_RET_FTE","TOTAL_GP_LOCUM_VAC_FTE","TOTAL_GP_LOCUM_ABS_FTE","TOTAL_GP_LOCUM_OTH_FTE",
-                   "MALE_GP_EXRRL_FTE","MALE_GP_REG_ST3_4_FTE","MALE_GP_RET_FTE","FEMALE_GP_EXRRL_FTE","FEMALE_GP_REG_ST3_4_FTE","FEMALE_GP_RET_FTE",
-                   "MALE_GP_EXRRL_HC_UNDER30","MALE_GP_EXRRL_HC_30TO34","MALE_GP_EXRRL_HC_35TO39","MALE_GP_EXRRL_HC_40TO44","MALE_GP_EXRRL_HC_45TO49","MALE_GP_EXRRL_HC_50TO54","MALE_GP_EXRRL_HC_55TO59","MALE_GP_EXRRL_HC_60TO64","MALE_GP_EXRRL_HC_65TO69","MALE_GP_EXRRL_HC_70PLUS","MALE_GP_EXRRL_HC_UNKNOWN_AGE",
-                   "FEMALE_GP_EXRRL_HC_UNDER30","FEMALE_GP_EXRRL_HC_30TO34","FEMALE_GP_EXRRL_HC_35TO39","FEMALE_GP_EXRRL_HC_40TO44","FEMALE_GP_EXRRL_HC_45TO49","FEMALE_GP_EXRRL_HC_50TO54","FEMALE_GP_EXRRL_HC_55TO59","FEMALE_GP_EXRRL_HC_60TO64","FEMALE_GP_EXRRL_HC_65TO69","FEMALE_GP_EXRRL_HC_70PLUS","FEMALE_GP_EXRRL_HC_UNKNOWN_AGE",
-                   "TOTAL_NURSES_HC","TOTAL_N_PRAC_NURSE_HC","TOTAL_N_ADV_NURSE_PRAC_HC","TOTAL_N_NURSE_SPEC_HC","TOTAL_N_EXT_ROLE_NURSE_HC","TOTAL_N_TRAINEE_NURSE_HC","TOTAL_N_DISTRICT_NURSE_HC","TOTAL_N_NURSE_DISP_HC",
-                   "TOTAL_NURSES_FTE","TOTAL_N_PRAC_NURSE_FTE","TOTAL_N_ADV_NURSE_PRAC_FTE","TOTAL_N_NURSE_SPEC_FTE","TOTAL_N_EXT_ROLE_NURSE_FTE","TOTAL_N_TRAINEE_NURSE_FTE","TOTAL_N_DISTRICT_NURSE_FTE","TOTAL_N_NURSE_DISP_FTE",
-                   "TOTAL_DPC_HC","TOTAL_DPC_DISPENSER_HC","TOTAL_DPC_HCA_HC","TOTAL_DPC_PHLEB_HC","TOTAL_DPC_PHARMA_HC","TOTAL_DPC_PHYSIO_HC","TOTAL_DPC_PODIA_HC","TOTAL_DPC_PHYSICIAN_ASSOC_HC","TOTAL_DPC_OTH_HC",
-                   "TOTAL_DPC_FTE","TOTAL_DPC_DISPENSER_FTE","TOTAL_DPC_HCA_FTE","TOTAL_DPC_PHLEB_FTE","TOTAL_DPC_PHARMA_FTE","TOTAL_DPC_PHYSIO_FTE","TOTAL_DPC_PODIA_FTE","TOTAL_DPC_PHYSICIAN_ASSOC_FTE","TOTAL_DPC_OTH_FTE",
-                   "TOTAL_ADMIN_HC","TOTAL_ADMIN_MANAGER_HC","TOTAL_ADMIN_MED_SECRETARY_HC","TOTAL_ADMIN_RECEPT_HC","TOTAL_ADMIN_TELEPH_HC","TOTAL_ADMIN_ESTATES_ANC_HC","TOTAL_ADMIN_OTH_HC",
-                   "TOTAL_ADMIN_FTE","TOTAL_ADMIN_MANAGER_FTE","TOTAL_ADMIN_MED_SECRETARY_FTE","TOTAL_ADMIN_RECEPT_FTE","TOTAL_ADMIN_TELEPH_FTE","TOTAL_ADMIN_ESTATES_ANC_FTE","TOTAL_ADMIN_OTH_FTE")
-  
   db = dbConnect(SQLite(), dbname=database_name)
-  
+  workforce_vars = get_workforce_varlist()
+    
   ccg_lsoa = tbl(db, "ccg_lsoa_lad_mapping") %>% 
     select(LSOA11CD,CCG19CD) %>%
     collect()
@@ -726,6 +699,57 @@ ccg_workforce = function(database_name="primary_care_data.sqlite3"){
 }
 
 
+calculate_pcn_imd_2019 = function(database_name="primary_care_data.sqlite3"){
+  db = dbConnect(SQLite(), dbname=database_name)
+  imd = tbl(db, "gp_imd_2019") %>% select(YEAR,PRAC_CODE,IMD_SCORE) %>% collect()
+  pop = tbl(db, "gp_population") %>% select(YEAR,PRAC_CODE,TOTAL_POP) %>% collect()
+  pcn_prac_mapping = tbl(db, "pcn_gp_practice_mapping") %>% select(PRAC_CODE,PCN_CODE) %>% collect()
+  
+  pcn_imd = imd %>% inner_join(pop) %>% inner_join(pcn_prac_mapping) %>%
+    group_by(YEAR,PCN_CODE) %>%
+    summarise(IMD_SCORE=sum(TOTAL_POP*IMD_SCORE), TOTAL_POP=sum(TOTAL_POP)) %>%
+    mutate(IMD_SCORE=IMD_SCORE/TOTAL_POP) %>%
+    ungroup() %>%
+    select(YEAR,PCN_CODE,IMD_SCORE)
+  
+  pcn_imd = pcn_imd %>% 
+    group_by(YEAR) %>%
+    mutate(IMD_RANK = row_number(-1*IMD_SCORE),
+           IMD_DECILE = ntile(IMD_RANK,10)) %>% 
+    add_quintiles()
+  
+  dbWriteTable(conn=db, name="pcn_imd_2019", pcn_imd, overwrite=TRUE)
+  
+  dbDisconnect(db)
+}
+
+pcn_workforce = function(database_name="primary_care_data.sqlite3"){
+  
+  db = dbConnect(SQLite(), dbname=database_name)
+  
+  pcn_prac_mapping = tbl(db, "pcn_gp_practice_mapping") %>% select("PRAC_CODE","PCN_CODE","PCN_NAME") %>% collect()
+  workforce_prac = tbl(db, "gp_workforce_newdata_imputed") %>% collect()
+  prac_pop = tbl(db,"gp_population") %>% collect()
+  workforce_vars = get_workforce_varlist()
+  
+  workforce_pcn = pcn_prac_mapping %>%
+    inner_join(workforce_prac) %>% 
+    inner_join(prac_pop) %>%
+    group_by(YEAR,PCN_CODE) %>%
+    summarise_at(vars(one_of(c(workforce_vars,"NEED_ADJ_POP","TOTAL_POP"))), sum, na.rm=TRUE) %>%
+    ungroup() %>% 
+    arrange(YEAR,PCN_CODE)
+  
+  dbWriteTable(conn = db, name = "pcn_workforce_imputed", workforce_pcn, overwrite=TRUE)
+  
+  dbDisconnect(db)
+}
+
+
+###############################################
+## code to generate geojson maps
+###############################################
+
 make_england_geojson = function(database_name="primary_care_data.sqlite3"){
   for(year in 2015:2018){
     ccg_map = readOGR("raw_data/geography/shape_files/Clinical_Commissioning_Groups_April_2019_Ultra_Generalised_Clipped_Boundaries_England/", 
@@ -733,12 +757,11 @@ make_england_geojson = function(database_name="primary_care_data.sqlite3"){
                       verbose=FALSE, stringsAsFactors=FALSE)
     ccg_map = spTransform(ccg_map, CRS("+proj=longlat +ellps=WGS84"))
     db = dbConnect(SQLite(), dbname=database_name)
-    ccg_pop = tbl(db, "ccg_pop") %>% filter(YEAR==year) %>% select(CCG19CD,TOTAL_POP,NEED_ADJ_POP) %>% collect()
     ccg_imd = tbl(db,"ccg_imd_2019") %>% select(CCG19CD,IMD_SCORE=average_score) %>% collect()
-    ccg_workforce = tbl(db,"ccg_workforce_imputed") %>% filter(YEAR==year) %>% select(CCG19CD,TOTAL_GP_EXRRL_HC, TOTAL_GP_EXRRL_FTE, TOTAL_NURSES_FTE,TOTAL_DPC_FTE,TOTAL_ADMIN_FTE) %>% collect()
+    ccg_workforce = tbl(db,"ccg_workforce_imputed") %>% filter(YEAR==year) %>% select(CCG19CD,TOTAL_GP_EXRRL_HC, TOTAL_GP_EXRRL_FTE, TOTAL_NURSES_FTE,TOTAL_DPC_FTE,TOTAL_ADMIN_FTE,TOTAL_POP,NEED_ADJ_POP) %>% collect()
     dbDisconnect(db)
     
-    ccg_data = ccg_imd %>% inner_join(ccg_pop) %>% inner_join(ccg_workforce) %>% 
+    ccg_data = ccg_imd %>% inner_join(ccg_workforce) %>% 
       mutate(GP_HC_100k=round(100000*TOTAL_GP_EXRRL_HC/TOTAL_POP,2),
              GP_FTE_100k = round(100000*TOTAL_GP_EXRRL_FTE/TOTAL_POP,2),
              NURSE_FTE_100k = round(100000*TOTAL_NURSES_FTE/TOTAL_POP,2),
@@ -783,6 +806,9 @@ make_ccg_geojson = function(database_name="primary_care_data.sqlite3"){
   
 }
   
+#################################################
+#### code to create online version of database
+#################################################
   make_online_database = function(offline_database_name="primary_care_data.sqlite3",online_database_name="primary_care_data_online.sqlite3"){
     db = dbConnect(SQLite(), dbname=offline_database_name)
     ccg_imd_2019 = tbl(db, "ccg_imd_2019") %>% collect()
@@ -795,6 +821,10 @@ make_ccg_geojson = function(database_name="primary_care_data.sqlite3"){
     gp_workforce_imd_quintiles_imputed = tbl(db, "gp_workforce_imd_quintiles_imputed") %>% collect()
     gp_workforce_newdata_imputed = tbl(db, "gp_workforce_newdata_imputed") %>% collect()
     gp_workforce_newdata_lsoa_imputed = tbl(db, "gp_workforce_newdata_lsoa_imputed") %>% collect()
+    workforce_variables = tbl(db,"workforce_variables") %>% collect()
+    pcn_imd_2019 = tbl(db,"pcn_imd_2019") %>% collect()
+    pcn_workforce_imputed = tbl(db,"pcn_workforce_imputed") %>% collect()
+    pcn_gp_practice_mapping = tbl(db,"pcn_gp_practice_mapping") %>% collect()
     dbDisconnect(db)
     
     db2 = dbConnect(SQLite(), dbname=online_database_name)
@@ -808,6 +838,10 @@ make_ccg_geojson = function(database_name="primary_care_data.sqlite3"){
     dbWriteTable(conn = db2, name = "gp_workforce_imd_quintiles_imputed", gp_workforce_imd_quintiles_imputed, overwrite=TRUE)
     dbWriteTable(conn = db2, name = "gp_workforce_newdata_imputed", gp_workforce_newdata_imputed, overwrite=TRUE)
     dbWriteTable(conn = db2, name = "gp_workforce_newdata_lsoa_imputed", gp_workforce_newdata_lsoa_imputed, overwrite=TRUE)
+    dbWriteTable(conn = db2, name = "workforce_variables", workforce_variables, overwrite=TRUE)
+    dbWriteTable(conn = db2, name = "pcn_imd_2019", pcn_imd_2019, overwrite=TRUE)
+    dbWriteTable(conn = db2, name = "pcn_workforce_imputed", pcn_workforce_imputed, overwrite=TRUE)
+    dbWriteTable(conn = db2, name = "pcn_gp_practice_mapping", pcn_gp_practice_mapping, overwrite=TRUE)
     dbDisconnect(db2)
   }
 

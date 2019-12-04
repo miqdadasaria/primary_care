@@ -41,17 +41,21 @@ make_popup_messages = function(map, selected_ccg){
 
 make_gp_markers = function(year, database_name="primary_care_data_online.sqlite3"){
   db = dbConnect(SQLite(), dbname=database_name)
-  geo = tbl(db,"ccg_practice_mapping") %>% select(PRAC_CODE=PRACTICE_CODE,LONG,LAT) %>% collect()
+  geo = tbl(db,"ccg_practice_mapping") %>% select(PRAC_CODE=PRACTICE_CODE,LONG,LAT,CCG19CD) %>% collect()
+  ccg_name = tbl(db,"ccg_ons_code_mapping") %>% select(CCG19CD,CCG19NM) %>% distinct(CCG19CD,CCG19NM) %>% collect()
+  pcn_name = tbl(db,"pcn_gp_practice_mapping") %>% select(PRAC_CODE,PCN_NAME) %>% collect()
   data = tbl(db,"gp_workforce_newdata_imputed") %>% filter(YEAR==year) %>% collect()
   pop = tbl(db, "gp_population") %>% filter(YEAR==year) %>% collect()
   imd = tbl(db, "gp_imd_2019") %>% filter(YEAR==year) %>% collect()
-  gp_practice_data = data %>% inner_join(pop) %>% inner_join(imd) %>% inner_join(geo)  
+  gp_practice_data = data %>% inner_join(pop) %>% inner_join(imd) %>% inner_join(geo) %>% inner_join(ccg_name) %>% left_join(pcn_name)  
   dbDisconnect(db)
   gp_practices = gp_practice_data %>%
-    select(PRAC_NAME, PRAC_CODE, IMD_SCORE, IMD_QUINTILE, TOTAL_POP, NEED_ADJ_POP,
+    select(PRAC_NAME, PRAC_CODE, CCG19NM,PCN_NAME, IMD_SCORE, IMD_QUINTILE, TOTAL_POP, NEED_ADJ_POP,
            TOTAL_GP_EXRRL_HC, TOTAL_GP_EXRRL_FTE,
            TOTAL_NURSES_FTE,TOTAL_DPC_FTE,TOTAL_ADMIN_FTE,LONG,LAT) %>%
     mutate(description = paste0("<b>Name: </b>",str_to_title(PRAC_NAME),"<br>",
+                                "<b>CCG Name: </b>",gsub("Ccg","CCG",gsub("Nhs","NHS",str_to_title(CCG19NM))),"<br>",
+                                "<b>PCN Name: </b>",gsub("Pcn","PCN",str_to_title(ifelse(is.na(PCN_NAME),"",PCN_NAME))),"<br>",
                                 "<b>IMD 2019 Score: </b>",round(IMD_SCORE,2),"<br>",
                                 "<b>IMD 2019 Quintile: </b>",IMD_QUINTILE,"<br>",
                                 "<b>Total Population: </b>",round(TOTAL_POP,0),"<br>",

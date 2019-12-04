@@ -12,7 +12,14 @@ get_ccg_list = function(database_name="primary_care_data_online.sqlite3"){
   names(ccg_list)=ccgs$CCG19NM
   return(ccg_list)
 }
-  
+
+get_workforce_varlist = function(database_name="primary_care_data_online.sqlite3"){
+  db = dbConnect(SQLite(), dbname=database_name)
+  workforce_vars =tbl(db,"workforce_variables") %>% filter(ATTRIBUTE==TRUE) %>% select(VARNAMES) %>% collect()
+  dbDisconnect(db)
+  return(workforce_vars$VARNAMES)
+}
+
 make_data_table = function(x_var, y_var, adj_method, year, geography, trim_outliers, database_name="primary_care_data_online.sqlite3"){
   db = dbConnect(SQLite(), dbname=database_name)
   
@@ -26,6 +33,12 @@ make_data_table = function(x_var, y_var, adj_method, year, geography, trim_outli
     names = tbl(db,"ccg_ons_code_mapping") %>% select(CCG19CD,CCG19NM) %>% distinct(CCG19CD,CCG19NM) %>% collect()
     graph_data = data %>% inner_join(imd) %>% inner_join(names)
     graph_data = graph_data %>% rename(ONS_CODE=CCG19CD, NAME=CCG19NM)
+  } else if(geography == "pcn"){
+    data = tbl(db,"pcn_workforce_imputed") %>% filter(YEAR==year) %>% collect()
+    imd = tbl(db, "pcn_imd_2019") %>% filter(YEAR==year) %>% select(PCN_CODE,IMD_SCORE,IMD_RANK) %>% collect()
+    names = tbl(db,"pcn_gp_practice_mapping") %>% select(PCN_CODE,PCN_NAME) %>% distinct(PCN_CODE,PCN_NAME) %>% collect()
+    graph_data = data %>% inner_join(imd) %>% inner_join(names)
+    graph_data = graph_data %>% rename(ONS_CODE=PCN_CODE, NAME=PCN_NAME)
   } else if(geography == "gp_practice"){
     # TODO: investigate why too many practices in workforce with 0 patient populations
     data = tbl(db,"gp_workforce_newdata_imputed") %>% filter(YEAR==year) %>% collect()
@@ -41,14 +54,14 @@ make_data_table = function(x_var, y_var, adj_method, year, geography, trim_outli
   
   dbDisconnect(db)
   
-  graph_data = graph_data %>% mutate(Name = NAME,
+  graph_data = graph_data %>% mutate(Name = gsub("Pcn","PCN",gsub("Ccg","CCG",gsub("Nhs","NHS",str_to_title(NAME)))),
                                      'ONS code' = ONS_CODE,
-                                     'IMD (2019) score' = IMD_SCORE,
+                                     'IMD (2019) score' = round(IMD_SCORE,0),
                                      'IMD (2019) rank' = IMD_RANK,
-                                     'Total population' = TOTAL_POP,
-                                     'Need adjusted population' = NEED_ADJ_POP,
-                                     'x' = get(x_var),
-                                     'y' = get(y_var)) %>%
+                                     'Total population' = round(TOTAL_POP,0),
+                                     'Need adjusted population' = round(NEED_ADJ_POP,0),
+                                     'x' = round(get(x_var),2),
+                                     'y' = get(y_var),2) %>%
     select(Name,'ONS code','IMD (2019) score','IMD (2019) rank','Total population','Need adjusted population','x','y')
   
   if(adj_method == "pop"){
@@ -62,6 +75,7 @@ make_data_table = function(x_var, y_var, adj_method, year, geography, trim_outli
     sigma = graph_data %>% summarise(sigma=sd(y)) %>% as.numeric()
     graph_data = graph_data %>% filter(y > (y_bar-3*sigma) & y < (y_bar+3*sigma))
   }
+  graph_data = graph_data %>% mutate(y=round(y,2))
   
   return(graph_data)
 }
@@ -75,6 +89,8 @@ make_var_label = function(varname){
   label = gsub("_POP","_population",label)
   label = gsub("IMD_","index of multiple deprivation (2019)_",label)
   label = gsub("_ADJ_","_adjusted_",label) 
+  label = gsub("_DPC_","_direct patient care_",label) 
+  label = gsub("_COQ_","_country of qualification_",label) 
   label = gsub("_"," ",label)
   label = lapply(strwrap(as.character(str_to_lower(label)), width=40, simplify=FALSE), paste, collapse="\n")
   return(label)
