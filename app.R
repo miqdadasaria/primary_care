@@ -65,7 +65,8 @@ ui = shinyUI(fluidPage(theme = "sandstone.css",
                                        selected = 2018),
                            
                            selectInput("selected_ccg", "CCG for map:",
-                                       c("All England"="",
+                                       c("All England (CCG)"="ccg",
+                                         "All England (LSOA)"="all",
                                             ccg_list),
                                        selected = ""
                            ),

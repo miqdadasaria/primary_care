@@ -7,6 +7,7 @@ library("purrr")
 library("modelr")
 library("ggpubr")
 library("rgdal")
+library("rmapshaper")
 
 make_age_group  = function(start_age, end_age){
   paste0("AGE_",start_age:end_age, collapse = "+")
@@ -750,7 +751,7 @@ pcn_workforce = function(database_name="primary_care_data.sqlite3"){
 ## code to generate geojson maps
 ###############################################
 
-make_england_geojson = function(database_name="primary_care_data.sqlite3"){
+make_england_ccg_geojson = function(database_name="primary_care_data.sqlite3"){
   for(year in 2015:2018){
     ccg_map = readOGR("raw_data/geography/shape_files/Clinical_Commissioning_Groups_April_2019_Ultra_Generalised_Clipped_Boundaries_England/", 
                       "Clinical_Commissioning_Groups_April_2019_Ultra_Generalised_Clipped_Boundaries_England",
@@ -772,6 +773,33 @@ make_england_geojson = function(database_name="primary_care_data.sqlite3"){
     ccg_map@data = ccg_map@data %>% left_join(ccg_data)
     writeOGR(ccg_map, dsn=paste0("maps/ccg_",year,"_map.geojson"), layer="OGRGeoJSON", driver="GeoJSON", check_exists=FALSE)
   }
+}
+
+make_england_lsoa_geojson = function(database_name="primary_care_data.sqlite3"){
+  lsoa_map = readOGR("raw_data/geography/shape_files/Lower_Layer_Super_Output_Areas_December_2011_Super_Generalised_Clipped__Boundaries_in_England_and_Wales/", 
+                     "Lower_Layer_Super_Output_Areas_December_2011_Super_Generalised_Clipped__Boundaries_in_England_and_Wales",
+                     verbose=FALSE, stringsAsFactors=FALSE)
+  lsoa_map = spTransform(lsoa_map, CRS("+proj=longlat +ellps=WGS84"))
+  db = dbConnect(SQLite(), dbname=database_name)
+  lsoa_workforce = tbl(db,"gp_workforce_newdata_lsoa_imputed") %>% select(YEAR, LSOA11CD, TOTAL_GP_EXRRL_HC, TOTAL_GP_EXRRL_FTE, TOTAL_NURSES_FTE,TOTAL_DPC_FTE,TOTAL_ADMIN_FTE,TOTAL_POP,NEED_ADJ_POP,IMD_SCORE,IMD_QUINTILE) %>% collect()
+  dbDisconnect(db)
+  
+  for (year in 2015:2018) {
+      lsoa_year_map = lsoa_map
+      lsoa_data = lsoa_workforce %>% filter(YEAR==year) %>%
+        mutate(GP_HC_100k=round(100000*TOTAL_GP_EXRRL_HC/TOTAL_POP,2),
+               GP_FTE_100k = round(100000*TOTAL_GP_EXRRL_FTE/TOTAL_POP,2),
+               NURSE_FTE_100k = round(100000*TOTAL_NURSES_FTE/TOTAL_POP,2),
+               DPC_FTE_100k = round(100000*TOTAL_DPC_FTE/TOTAL_POP,2),
+               ADMIN_FTE_100k = round(100000*TOTAL_ADMIN_FTE/TOTAL_POP,2)) %>%
+        select(lsoa11cd=LSOA11CD,IMD_SCORE,IMD_QUINTILE,TOTAL_POP,NEED_ADJ_POP,GP_HC_100k,GP_FTE_100k,NURSE_FTE_100k,DPC_FTE_100k,ADMIN_FTE_100k)
+      lsoa_year_map@data = lsoa_year_map@data %>% left_join(lsoa_data)
+      
+      lsoa_year_map = ms_simplify(lsoa_year_map)
+      writeOGR(lsoa_year_map, dsn=paste0("maps/ccg_lsoa_all_",year,"_map.geojson"), layer="OGRGeoJSON", driver="GeoJSON", check_exists=FALSE)
+      
+    }
+  
 }
 
 make_ccg_geojson = function(database_name="primary_care_data.sqlite3"){

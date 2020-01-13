@@ -5,7 +5,7 @@ library(ggplot2)
 library(RSQLite)
 
 read_geojson = function(year, selected_ccg){
-  if(selected_ccg==""){
+  if(selected_ccg=="ccg"){
     ccg_map = readOGR(dsn=paste0("maps/ccg_",year,"_map.geojson"), verbose=FALSE, stringsAsFactors=FALSE)
   } else {
     ccg_map = readOGR(dsn=paste0("maps/ccg_lsoa_",selected_ccg,"_",year,"_map.geojson"), verbose=FALSE, stringsAsFactors=FALSE)
@@ -14,7 +14,7 @@ read_geojson = function(year, selected_ccg){
 }
 
 make_popup_messages = function(map, selected_ccg){
-  if(selected_ccg==""){
+  if(selected_ccg=="ccg"){
     popup_messages = paste0("<b>Name: </b>",map$ccg19nm,"<br>",
                           "<b>IMD 2019 Score: </b>",map$IMD_SCORE,"<br>",
                           "<b>Total Population: </b>",map$TOTAL_POP,"<br>",
@@ -130,7 +130,7 @@ make_choropleth_map = function(year, selected_ccg, database_name="primary_care_d
       position = "topleft",
       options = layersControlOptions(collapsed = FALSE)
     ) %>%
-    setView(lng=mean(ccg_map@bbox["x",]), lat=mean(ccg_map@bbox["y",]), zoom=if_else(selected_ccg=="",6,11)) %>% 
+    setView(lng=mean(ccg_map@bbox["x",]), lat=mean(ccg_map@bbox["y",]), zoom=if_else(selected_ccg=="ccg",6,11)) %>% 
       addMarkers(lng=~LONG, lat=~LAT, 
                  popup=~as.character(description), 
                  label=~str_to_title(PRAC_NAME),
