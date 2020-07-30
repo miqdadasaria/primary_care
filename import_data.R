@@ -25,6 +25,13 @@ add_quintiles = function(data_with_deciles){
   return(data_with_quintiles)
 }
 
+age_range_to_integer = function(age_range){
+  age = c(30,32,37,42,47,52,57,62,67,70,NA)
+  names(age) = c("UNDER30","30TO34","35TO39","40TO44","45TO49","50TO54","55TO59","60TO64","65TO69","70PLUS","UNKNOWN")
+  
+  return(unname(age[age_range]))
+}
+
 write_lsoa_01_11_mapping = function(database_name="primary_care_data.sqlite3"){
   mapping = read_csv("raw_data/Lower_Layer_Super_Output_Area_2001_to_Lower_Layer_Super_Output_Area_2011_to_Local_Authority_District_2011_Lookup_in_England_and_Wales.csv")
   weighted_mapping = mapping %>% left_join(
@@ -137,7 +144,7 @@ write_workforce_data_to_db_new = function(database_name="primary_care_data.sqlit
   
   gp_year = list()
   for (year in 2015:2018) {
-    wf = read_csv(paste0("raw_data/workforce/GPs 2015-2018/General Practice September ",year," Practice Level.csv"),
+    wf = read_csv(paste0("raw_data/workforce/GPs 2015-2019/General Practice September ",year," Practice Level.csv"),
                   guess_max = 100000,
                   na=c("","NA","EST","NS",".","ND"))
     wf = wf %>% mutate(YEAR=year)
@@ -561,23 +568,41 @@ calculate_gp_practice_imd_2019 = function(database_name="primary_care_data.sqlit
     summarise(IMD_SCORE=sum(PRAC_PROP*TOTAL_POP*IMD_SCORE), TOTAL_POP=sum(PRAC_PROP*TOTAL_POP)) %>%
     mutate(IMD_SCORE=IMD_SCORE/TOTAL_POP) %>%
     ungroup() %>%
-    select(YEAR,PRAC_CODE,IMD_SCORE)
+    select(YEAR,PRAC_CODE,IMD_SCORE,TOTAL_POP)
     
   prac_imd = prac_imd %>% 
     group_by(YEAR) %>%
-    mutate(IMD_RANK = row_number(-1*IMD_SCORE),
-           IMD_DECILE = ntile(IMD_RANK,10)) %>% 
-    add_quintiles()
-    
+    arrange(-IMD_SCORE) %>%
+    mutate(CUM_POP = cumsum(TOTAL_POP), PROP = CUM_POP/max(CUM_POP),
+           IMD_DECILE=cut(PROP,10,labels=FALSE),
+           IMD_QUINTILE = cut(PROP,5,labels=FALSE)) %>%
+  select(YEAR,PRAC_CODE,IMD_SCORE,IMD_DECILE,IMD_QUINTILE)
+  
   dbWriteTable(conn=db, name="gp_imd_2019", prac_imd, overwrite=TRUE)
   
   dbDisconnect(db)
 }
 
+calculate_ccg_imd_2019 = function(database_name="primary_care_data.sqlite3"){
+  db = dbConnect(SQLite(), dbname=database_name)
+  ccg_imd = tbl(db,"ccg_imd_2019") %>% collect()
+  ccg_pop = tbl(db,"ccg_pop") %>% filter(YEAR==2015) %>% select(CCG19CD,TOTAL_POP) %>% collect()
+  ccg_imd_quintiles = ccg_imd %>% inner_join(ccg_pop) %>% arrange(-average_score) %>% 
+    mutate(CUM_POP = cumsum(TOTAL_POP), PROP = CUM_POP/max(CUM_POP),
+           IMD_DECILE=cut(PROP,10,labels=FALSE),
+           IMD_QUINTILE = cut(PROP,5,labels=FALSE)) %>%
+    select(-TOTAL_POP,-CUM_POP,-PROP)
+  
+  dbWriteTable(conn=db, name="ccg_imd_2019", ccg_imd_quintiles, overwrite=TRUE)
+  
+  dbDisconnect(db)
+  
+}
+
 calculate_gp_practice_populations = function(database_name="primary_care_data.sqlite3"){
   db = dbConnect(SQLite(), dbname=database_name)
   ads = tbl(db, "ads_prac_props") %>% collect()
-  pop = tbl(db, "carr_hill_pop") %>% filter(YEAR==2015) %>% select(LSOA11CD,TOTAL_POP,NEED_ADJ_POP) %>% collect()
+  pop = tbl(db, "carr_hill_pop") %>% select(YEAR,LSOA11CD,TOTAL_POP,NEED_ADJ_POP) %>% collect()
   
   prac_pop = ads %>% inner_join(pop) %>%
     group_by(YEAR,PRAC_CODE) %>%
@@ -834,6 +859,239 @@ make_ccg_geojson = function(database_name="primary_care_data.sqlite3"){
   
 }
   
+
+import_ethnicity_data = function(database_name="primary_care_data.sqlite3"){
+  bame = read_csv("raw_data/census pop/ethnicity_lsoa.csv")
+  bame = bame %>% mutate(BAME_Q=ntile(BAME_PERCENTAGE,5))
+  
+  religion = read_csv("raw_data/census pop/religion_lsoa.csv")
+  religion = religion %>% filter(grepl("^E",LSOA11CD))
+  
+  db = dbConnect(SQLite(), dbname=database_name)
+  dbWriteTable(conn = db, name = "bame_lsoa", bame, overwrite=TRUE)
+  dbWriteTable(conn = db, name = "religion_lsoa", religion, overwrite=TRUE)
+  dbDisconnect(db)
+  
+}
+
+
+#################################################
+#### payments to GP practices data
+#################################################
+
+import_payments_data = function(database_name="primary_care_data.sqlite3"){
+  db = dbConnect(SQLite(), dbname=database_name)
+  dbRemoveTable(db,"gp_practice_payments",fail_if_missing=FALSE)
+  
+  payments = read_csv(paste0("raw_data/payments/nhspaymentsgp-15-16-csv.csv"))
+  colnames(payments) = gsub("_\xa3","",colnames(payments))
+  
+  payments = payments %>% mutate(YEAR=2015) %>% select(YEAR,
+                                                       PRAC_CODE=PracticeCode,
+                                                       PATIENTS=NumberOfRegisteredPatientsLastKnownFigure,
+                                                       WEIGHTED_PATIENTS=NumberOfWeightedPatientsLastKnownFigure,
+                                                       TOTAL_PAYMENTS=TotalNHSPaymentsToGeneralPractice,
+                                                       NET_PAYMENTS=TotalNHSPaymentsToGeneralPracticeMinusDeductions)
+  dbWriteTable(conn=db, name="gp_practice_payments", payments, append=TRUE)
+  
+  payments = read_csv(paste0("raw_data/payments/nhspaymentsgp-16-17-csv.csv"),skip=1,col_names=FALSE)
+  
+  payments = payments %>% mutate(YEAR=2016) %>% select(YEAR,
+                                                       PRAC_CODE=5,
+                                                       PATIENTS=17,
+                                                       WEIGHTED_PATIENTS=18,
+                                                       TOTAL_PAYMENTS=52,
+                                                       NET_PAYMENTS=54)
+  dbWriteTable(conn=db, name="gp_practice_payments", payments, append=TRUE)
+  
+  payments = read_csv(paste0("raw_data/payments/nhspaymentsgp-17-18-csv.csv"))
+  colnames(payments) = gsub("_\xa3","",colnames(payments))
+  
+  payments = payments %>% mutate(YEAR=2017) %>% select(YEAR,
+                                                       PRAC_CODE=`Practice Code`,
+                                                       PATIENTS=`Number of Registered Patients (Last Known Figure)`,
+                                                       WEIGHTED_PATIENTS=`Number of Weighted Patients (Last Known Figure)`,
+                                                       TOTAL_PAYMENTS=`Total NHS Payments to General Practice`,
+                                                       NET_PAYMENTS=`Total NHS Payments to General Practice Minus Deductions`)
+  dbWriteTable(conn=db, name="gp_practice_payments", payments, append=TRUE)
+  
+  payments = read_csv(paste0("raw_data/payments/nhspaymentsgp-18-19-csv.csv"))
+  colnames(payments) = gsub("_\xa3","",colnames(payments))
+  
+  payments = payments %>% mutate(YEAR=2018) %>% select(YEAR,
+                                                       PRAC_CODE=`Practice Code`,
+                                                       PATIENTS=`Average Number of Registered Patients`,
+                                                       WEIGHTED_PATIENTS=`Average Number of Weighted Patients`,
+                                                       TOTAL_PAYMENTS=`Total NHS Payments to General Practice`,
+                                                       NET_PAYMENTS=`Total NHS Payments to General Practice Minus Deductions`)
+  dbWriteTable(conn=db, name="gp_practice_payments", payments, append=TRUE)
+  
+  
+  dbDisconnect(db)
+}
+
+
+attribute_payments_data_to_lsoa = function(database_name="primary_care_data.sqlite3"){
+  db = dbConnect(SQLite(), dbname=database_name)
+  payments = tbl(db, "gp_practice_payments") %>% collect()
+  ads_lsoa = tbl(db, "ads_lsoa_props") %>% filter(YEAR>2014) %>% collect()
+  payments_lsoa = inner_join(payments,ads_lsoa) %>%
+    mutate_at(vars(one_of(c("TOTAL_PAYMENTS","NET_PAYMENTS","PATIENTS","WEIGHTED_PATIENTS"))), ~(.*LSOA_PROP)) %>%
+    group_by(YEAR,LSOA11CD) %>%
+    summarise_at(vars(one_of(c("TOTAL_PAYMENTS","NET_PAYMENTS","PATIENTS","WEIGHTED_PATIENTS"))), sum, na.rm=TRUE)
+  
+  dbWriteTable(conn=db, name="gp_practice_payments_lsoa", payments_lsoa, overwrite=TRUE)
+  dbDisconnect(db)
+}
+
+#################################################
+#### GP patient satisfaction survey data
+#################################################
+
+import_gpps = function(database_name="primary_care_data.sqlite3"){
+  gpps = read_csv("raw_data/gpps/GPPS_1516_1819.csv")
+  gpps = gpps %>% filter(GPPS_GOOD>0)
+  db = dbConnect(SQLite(), dbname=database_name)
+  dbWriteTable(db,"gpps",gpps, overwrite=TRUE)
+  dbDisconnect(db)
+}
+
+
+attribute_gpps_data_to_lsoa = function(database_name="primary_care_data.sqlite3"){
+  db = dbConnect(SQLite(), dbname=database_name)
+  gpps = tbl(db, "gpps") %>% collect()
+  ads_lsoa = tbl(db, "ads_prac_props") %>% filter(YEAR>2014) %>% collect()
+  # ggps data does not cover every practice in ads so we need to renormalise data aggregated at LSOAs
+  missing = inner_join(gpps,ads_lsoa) %>% 
+    group_by(YEAR,LSOA11CD) %>% 
+    summarise(check=sum(PRAC_PROP)) %>% 
+    mutate(missing_data_inflation_factor = 1/check)
+  gpps_lsoa = inner_join(gpps,ads_lsoa) %>%
+    inner_join(missing) %>%
+    mutate_at(vars(one_of(c("GPPS_GOOD"))), ~(.*PRAC_PROP*missing_data_inflation_factor)) %>%
+    group_by(YEAR,LSOA11CD) %>%
+    summarise_at(vars(one_of(c("GPPS_GOOD"))), sum, na.rm=TRUE)
+  
+  dbWriteTable(conn=db, name="gpps_lsoa", gpps_lsoa, overwrite=TRUE)
+  dbDisconnect(db)
+}
+
+######################################################
+#### care quality commission ratings for GP practices
+######################################################
+
+import_cqc = function(database_name="primary_care_data.sqlite3"){
+  cqc = read_csv("raw_data/cqc/CQC_1516_1819.csv")
+  
+  db = dbConnect(SQLite(), dbname=database_name)
+  dbWriteTable(db,"cqc",cqc, overwrite=TRUE)
+  dbDisconnect(db)
+}
+
+#################################################
+#### quality and outcomes framework data
+#################################################
+
+import_qof_data = function(database_name="primary_care_data.sqlite3"){
+  db = dbConnect(SQLite(), dbname=database_name)
+  dbRemoveTable(db,"gp_practice_qof",fail_if_missing=FALSE)
+  
+  for (y in 15:18) {
+    qof = read_csv(paste0("raw_data/qof/ACHIEVEMENT_",y,y+1,".csv"))
+    
+    year = 2000+y
+    points = qof %>% 
+      filter(MEASURE=="ACHIEVED_POINTS") %>% 
+      group_by(PRACTICE_CODE) %>% 
+      summarise(TOTAL_POINTS=sum(VALUE)) %>%
+      mutate(YEAR=year) %>%
+      select(YEAR,PRAC_CODE=PRACTICE_CODE,TOTAL_POINTS)
+    
+    dbWriteTable(db,"gp_practice_qof",points,append=TRUE)
+  }
+  dbDisconnect(db)
+}
+
+attribute_qof_data_to_lsoa = function(database_name="primary_care_data.sqlite3"){
+  db = dbConnect(SQLite(), dbname=database_name)
+  qof = tbl(db, "gp_practice_qof") %>% collect()
+  ads_lsoa = tbl(db, "ads_prac_props") %>% filter(YEAR>2014) %>% collect()
+  # qof data does not cover every practice in ads so we need to renormalise data aggregated at LSOAs
+  missing = inner_join(qof,ads_lsoa) %>% 
+    group_by(YEAR,LSOA11CD) %>% 
+    summarise(check=sum(PRAC_PROP)) %>% 
+    mutate(missing_data_inflation_factor = 1/check)
+  qof_lsoa = inner_join(qof,ads_lsoa) %>%
+    inner_join(missing) %>%
+    mutate_at(vars(one_of(c("TOTAL_POINTS"))), ~(.*PRAC_PROP*missing_data_inflation_factor)) %>%
+    group_by(YEAR,LSOA11CD) %>%
+    summarise_at(vars(one_of(c("TOTAL_POINTS"))), sum, na.rm=TRUE)
+  
+  dbWriteTable(conn=db, name="gp_practice_qof_lsoa", qof_lsoa, overwrite=TRUE)
+  dbDisconnect(db)
+}
+
+#################################################
+#### GP practice appointment data
+#################################################
+write_appointment_data = function(database_name="primary_care_data.sqlite3"){
+  
+  db = dbConnect(SQLite(), dbname=database_name)
+  ons_codes = tbl(db, "CCG_ONS_CODE_MAPPING") %>% distinct(CCG19CD,CCG19CDH) %>% collect()
+  coverage = read_csv("raw_data/appointments/Appointments_GP_Daily/APPOINTMENTS_GP_COVERAGE.csv") 
+  coverage = coverage  %>%
+    select(CCG19CDH=COMMISSIONER_ORGANISATION_CODE,
+           DATE=Appointment_Month,
+           INCLUDED=`Included Practices`,
+           OPEN=`Open Practices`,
+           PATIENTS_INCLUDED=`Patients registered at included practices`,
+           PATIENT_OPEN=`Patients registered at open practices`) %>% 
+    mutate(DATE=dmy(DATE),MONTH=month(DATE),YEAR=year(DATE)) %>%
+    inner_join(ons_codes) %>%
+    select(CCG19CD,YEAR,MONTH,OPEN,INCLUDED,PATIENT_OPEN,PATIENTS_INCLUDED)
+  dbWriteTable(conn=db, name="appointment_data_coverage", coverage, overwrite=TRUE)
+  
+  dbRemoveTable(db,"appointment_data",fail_if_missing=FALSE)
+  
+  for (year in 18:19) {
+    for (month in month(1:12,label = TRUE)) {
+      filename = paste0("raw_data/appointments/Appointments_GP_Daily/CCG_CSV_",month,"_",year,".csv")
+      if (file.exists(filename)){
+        appts = read_csv(filename)
+        appts = appts %>% select(CCG19CD=CCG_ONS_CODE, 
+                                 DATE=Appointment_Date, 
+                                 STATUS=APPT_STATUS,
+                                 HCP=HCP_TYPE,
+                                 MODE=APPT_MODE,
+                                 WAIT=TIME_BETWEEN_BOOK_AND_APPT,
+                                 COUNT=COUNT_OF_APPOINTMENTS) %>%
+          mutate(DATE=dmy(DATE),
+                 DAY=as.character(wday(DATE,label=TRUE)),
+                 WEEK=week(DATE),
+                 MONTH=month(DATE),
+                 YEAR=year(DATE),
+                 DATE=as.character(DATE))
+        dbWriteTable(conn=db, name="appointment_data", appts, append=TRUE)
+      }
+    }
+  }
+  
+  dbDisconnect(db)
+}
+
+#################################################
+#### import political boundaries
+#################################################
+import_political_geography = function(database_name="primary_care_data.sqlite3"){
+  lsoa_ward = read_csv("raw_data/geography/political/Lower_Layer_Super_Output_Area_2011_to_Ward_2018_Lookup_in_England_and_Wales_v3.csv")
+  ward_cons = read_csv("raw_data/geography/political/Ward_to_Westminster_Parliamentary_Constituency_to_Local_Authority_District_December_2018_Lookup_in_the_United_Kingdom.csv")
+  political_geography = inner_join(lsoa_ward %>% select(LSOA11CD,WD18CD),ward_cons) %>% select(-FID)
+  
+  db = dbConnect(SQLite(), dbname=database_name)
+  dbWriteTable(conn=db, name="political_geography", political_geography, overwrite=TRUE)
+  dbDisconnect(db)
+}
+
 #################################################
 #### code to create online version of database
 #################################################
