@@ -54,7 +54,9 @@ plot_payments_data = function(database_name="primary_care_data.sqlite3", level="
   
   start_year=2015
   end_year=2018
-  pay_plot = ggplot(graph_data %>% filter(N == "Net Payment", W == "Need Adjusted")) + 
+  figure_1_data = graph_data %>% filter(N == "Net Payment", W == "Need Adjusted")
+  write_csv(figure_1_data, "briefing/csv/figure_1.csv")
+  pay_plot = ggplot(figure_1_data) + 
     aes(x=YEAR, y=VALUE, group=IMD_QUINTILE, colour=IMD_QUINTILE) + 
     geom_line(aes(linetype=IMD_QUINTILE)) + 
     geom_point(aes(shape=IMD_QUINTILE, colour=IMD_QUINTILE), size=3) +
@@ -159,7 +161,7 @@ plot_payments_data_london = function(database_name="primary_care_data.sqlite3", 
   ggsave(paste0("briefing/payment_trends_lsoa_list_non_london.",output_type), pay_plot, width=20, height=20, units="cm", dpi="print")
 }
 
-plot_appointments_data = function(database_name="primary_care_data.sqlite3", population="reported", output_type="png"){
+plot_appointments_data = function(database_name="primary_care_data.sqlite3", population="ons", output_type="png"){
   db = dbConnect(SQLite(), dbname=database_name)
   appt = tbl(db,"appointment_data") %>% collect()
   denom = tbl(db,"appointment_data_coverage") %>% select(YEAR,MONTH,CCG19CD,PATIENTS_INCLUDED,PATIENT_OPEN) %>% collect()
@@ -284,7 +286,7 @@ plot_appointments_data = function(database_name="primary_care_data.sqlite3", pop
   
   ggsave(paste0("briefing/appointments_raw_",population,".",output_type), raw_plot, width=25, height=35, units="cm", dpi="print")
   
-  
+  write_csv(graph_data_1,"briefing/csv/figure_5.csv")
   hcp_plot = ggplot(graph_data_1) + 
     aes(x=DATE, y=APPTS_PER_100_PATS, group=IMD_QUINTILE, colour=IMD_QUINTILE) + 
     geom_line(aes(linetype=IMD_QUINTILE)) + 
@@ -310,6 +312,7 @@ plot_appointments_data = function(database_name="primary_care_data.sqlite3", pop
          caption = "Note: Data are from NHS Digital (appointments) and DWP (index of multiple deprivation) based on LSOA 2011 neighbourhoods")
   ggsave(paste0("briefing/appointments_hcp_",population,".",output_type), hcp_plot, width=25, height=15, units="cm", dpi="print")
   
+  write_csv(graph_data_2,"briefing/csv/figure_6.csv")
   mode_plot = ggplot(graph_data_2) + 
     aes(x=DATE, y=APPTS_PER_100_PATS, group=IMD_QUINTILE, colour=IMD_QUINTILE) + 
     geom_line(aes(linetype=IMD_QUINTILE)) + 
@@ -335,6 +338,7 @@ plot_appointments_data = function(database_name="primary_care_data.sqlite3", pop
   
   ggsave(paste0("briefing/appointments_mode_",population,".",output_type), mode_plot, width=35, height=15, units="cm", dpi="print")
   
+  write_csv(graph_data_3,"briefing/csv/figure_10.csv")
   dna_plot = ggplot(graph_data_3) + 
     aes(x=IMD_QUINTILE, y=DNA) + 
     geom_col() +
@@ -484,10 +488,14 @@ plot_workforce_mix = function(database_name="primary_care_data.sqlite3", level="
   
   ggsave(paste0("briefing/workforce_",level,"_",population,".",output_type), all_staff_plot_pop, width=25, height=35, units="cm", dpi="print")
   
-  fte_staff_plot_pop = ggplot(
-    subset(graph_data, TYPE=="Full time equivalent" & 
-             VARIABLE %in% c("GPs excluding registrars, retainers and locums","Nurses","Direct patient care staff"))) + 
-    aes(x=YEAR, y=(100000*VALUE/get(pop_var)), group=IMD_QUINTILE, colour=IMD_QUINTILE) + 
+  figure_3_data = subset(graph_data, TYPE=="Full time equivalent" & 
+                           VARIABLE %in% c("GPs excluding registrars, retainers and locums","Nurses","Direct patient care staff")) %>%
+    mutate(VALUE = (100000*VALUE/get(pop_var))) %>%
+    select(-NEED_ADJ_POP)
+  write_csv(figure_3_data,"briefing/csv/figure_3.csv")
+  
+  fte_staff_plot_pop = ggplot(figure_3_data) + 
+    aes(x=YEAR, y=VALUE, group=IMD_QUINTILE, colour=IMD_QUINTILE) + 
     geom_line(aes(linetype=IMD_QUINTILE)) + 
     geom_point(aes(shape=IMD_QUINTILE, colour=IMD_QUINTILE), size=3) +
     xlab("Year") +
@@ -698,6 +706,8 @@ plot_gpps = function(database_name="primary_care_data.sqlite3", level="lsoa", po
       mutate(IMD_QUINTILE = factor(IMD_QUINTILE, 1:5, c("Q1 (most deprived)","Q2","Q3","Q4","Q5 (least deprived)")))
   }
   
+  write_csv(graph_data, "briefing/csv/figure_9.csv")
+  
   start_year=2015
   end_year=2018
   gpps_plot = ggplot(graph_data) + 
@@ -818,6 +828,7 @@ plot_cqc = function(database_name="primary_care_data.sqlite3", output_type="png"
     ungroup() %>%
     mutate(prop = n/N)
   
+  
   cqc_plot = ggplot(graph_data, aes(x=IMD_QUINTILE,y=prop)) +
     geom_col() +
     xlab("Deprivation") +
@@ -835,7 +846,10 @@ plot_cqc = function(database_name="primary_care_data.sqlite3", output_type="png"
   
   ggsave(paste0("briefing/cqc_practice",".",output_type), cqc_plot, width=25, height=20, units="cm", dpi="print")
   
-  cqc_plot_2 = ggplot(subset(graph_data,CQC_OVERALL %in% c("Inadequate","Requires improvement","Outstanding")), aes(x=IMD_QUINTILE,y=prop)) +
+  figure_8_data = subset(graph_data,CQC_OVERALL %in% c("Inadequate","Requires improvement","Outstanding"))
+  write_csv(figure_8_data, "briefing/csv/figure_8.csv")
+  
+  cqc_plot_2 = ggplot(figure_8_data, aes(x=IMD_QUINTILE,y=prop)) +
     geom_col() +
     xlab("Deprivation") +
     ylab("Percentage of practices in deprivation group awarded CQC rating") +
@@ -884,6 +898,8 @@ plot_qof_data = function(database_name="primary_care_data.sqlite3", level="lsoa"
       ungroup() %>%
       mutate(IMD_QUINTILE = factor(IMD_QUINTILE, 1:5, c("Q1 (most deprived)","Q2","Q3","Q4","Q5 (least deprived)")))
   }
+  
+  write_csv(graph_data, "briefing/csv/figure_7.csv")
   
   start_year=2015
   end_year=2018
@@ -1012,6 +1028,8 @@ plot_gp_prac_size = function(database_name="primary_care_data.sqlite3", year=201
     filter(TOTAL_GP_EXRRL_HC==1) %>%
     group_by(IMD_QUINTILE) %>%
     summarise(sh = n())
+  
+  write_csv(single_handers, "briefing/csv/figure_2.csv")
   
   sh_plot = ggplot(single_handers, aes(x=IMD_QUINTILE,y=sh)) +
     geom_col() +

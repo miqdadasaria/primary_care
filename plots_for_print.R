@@ -236,7 +236,13 @@ graph_gp_age_sex = function(database_name="primary_care_data.sqlite3", year=2018
   
   ggsave(paste0("figures/gp_age_sex_pop_",year,suffix,".png"), gp_plot_pop, width=35, height=25, units="cm", dpi="print")
   
-  gp_plot_pop_adj = ggplot(graph_data, aes(x=AGE, y=(100000*GP_EXRRL_HC/NEED_ADJ_POP))) +
+  figure_4_data = graph_data %>% 
+    mutate(GP_PER_100k = 100000*GP_EXRRL_HC/NEED_ADJ_POP) %>%
+    select(IMD_QUINTILE,SEX,AGE,GP_PER_100k)
+
+  write_csv(figure_4_data, "briefing/csv/figure_4.csv")
+  
+  gp_plot_pop_adj = ggplot(figure_4_data, aes(x=AGE, y=GP_PER_100k)) +
     geom_bar(stat="identity") +
     facet_grid(SEX ~ IMD_QUINTILE) +
     theme_bw() + 
